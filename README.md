@@ -12,7 +12,16 @@
 git clone <원격-저장소-URL>
 ```
 
-### 2. 브랜치 전략 (Branching)
+### 2. 환경 설정 (Setup)
+개발에 사용한 파이썬 패키지를 관리하는 법
+
+파이썬 패키지 설치 하는 법
+```bash
+# 필수 패키지 설치
+pip install -r requirements.txt
+```
+
+### 3. 브랜치 전략 (Branching)
 코드를 수정하거나 새로운 기능을 추가할 때는 **반드시 새로운 브랜치**를 생성해야 합니다.
 - **Naming Convention:** `feature/기능이름` (예: `feature/sensor-data`, `feature/ai-model`)
 - **브랜치 생성 및 이동:**
@@ -25,6 +34,15 @@ git clone <원격-저장소-URL>
 1. 본인의 feature 브랜치에서 작업 완료 후 Push
 2. GitHub/GitLab 등 원격 저장소에서 `main` 브랜치로의 PR 생성
 3. 코드 리뷰 후 승인되면 Merge
+
+### 4. 패키지 관리 (Dependency Management)
+새로운 패키지를 설치하여 작업한 경우, 다른 팀원들도 동일한 환경을 갖출 수 있도록 `requirements.txt`를 업데이트해야 합니다.
+```bash
+# 새로운 패키지 설치 후 파일 업데이트
+pip freeze > requirements.txt
+```
+*주의: 커밋 시 업데이트된 `requirements.txt` 파일을 반드시 포함해 주세요.*
+'requirments.txt는 반드시 main브랜치에서 수정하고 커밋해주세요!
 
 ---
 
