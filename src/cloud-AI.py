@@ -35,5 +35,5 @@ class GeminiExpert:
             return {"score": 0, "summary": "오류", "advice": str(e)}
 
 expert = GeminiExpert(os.getenv("GEMINI_API_KEY"))
-result = expert.analyze_plant("test_plant.jpg", 30)
+result = expert.analyze_plant("test_files/test_plants.jpg", 30)
 print(result)
