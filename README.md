@@ -41,8 +41,8 @@ pip install -r requirements.txt
 # 새로운 패키지 설치 후 파일 업데이트
 pip freeze > requirements.txt
 ```
-*주의: 커밋 시 업데이트된 `requirements.txt` 파일을 반드시 포함해 주세요.*
-'requirments.txt는 반드시 main브랜치에서 수정하고 커밋해주세요!
+*주의1: 커밋 시 업데이트된 `requirements.txt` 파일을 반드시 포함해 주세요.*
+*주의2: `requirements.txt` 파일은 반드시 main브랜치에서 수정하고 커밋해주세요!*
 
 ---
 
