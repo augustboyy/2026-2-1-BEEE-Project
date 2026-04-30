@@ -46,5 +46,3 @@ git clone <원격-저장소-URL>
 
 ## 📁 프로젝트 구조
 - `cloud-A.I.py`: AI 관련 메인 로직 (작업 예정)
-- `result.txt`: 실험 결과 데이터 기록
-- `test_plant.jpg`: 실험용 테스트 이미지
