@@ -7,7 +7,7 @@ from ultralytics import YOLO
 
 class PlantVision:
     def __init__(self):
-        self.model = YOLO('yolov8n.pt') 
+        self.model = YOLO('best.pt') 
         self.path_9am = "ref_9am.jpg"
         self.path_prev = "ref_prev.jpg"
         self.path_curr = "current.jpg"
