@@ -1,3 +1,9 @@
+"""
+이 파일은 SQLite 데이터베이스 연결 및 스키마 관리를 담당합니다.
+애플리케이션에서 사용하는 모든 테이블 구조와 인덱스를 정의하며,
+트랜잭션 관리 및 쿼리 실행을 위한 래퍼 함수를 제공합니다.
+"""
+
 from __future__ import annotations
 
 import sqlite3
@@ -7,9 +13,11 @@ from pathlib import Path
 from typing import Iterator
 
 
+# 데이터베이스 스키마 버전 관리를 위한 변수입니다.
 CURRENT_SCHEMA_VERSION = 2
 
 
+# 기본이 되는 테이블 구조를 정의합니다. (식물, 사진, 센서 로그, 급수 로그, AI 분석 결과 등)
 BASE_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS plants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,6 +143,7 @@ CREATE TABLE IF NOT EXISTS error_logs (
 """
 
 
+# 확장된 기능을 위한 추가 스키마를 정의합니다. (식물 프로필, 카메라 캡처, AI 알림 등)
 EXTENDED_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS species_profiles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -279,6 +288,7 @@ CREATE TABLE IF NOT EXISTS device_heartbeats (
 """
 
 
+# 검색 성능 향상을 위한 인덱스들을 정의합니다.
 INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_plants_active_created
     ON plants (is_active, created_at DESC);
@@ -325,22 +335,41 @@ CREATE INDEX IF NOT EXISTS idx_device_heartbeats_status_received
 """
 
 
+# 모든 SQL 구문을 합칩니다.
 SCHEMA_SQL = BASE_SCHEMA_SQL + EXTENDED_SCHEMA_SQL + INDEX_SQL
 
 
 class Database:
+    """
+    SQLite 데이터베이스 작업을 캡슐화한 클래스입니다.
+    스레드 안전(Thread-safe)한 접근과 트랜잭션 관리를 지원합니다.
+    """
     def __init__(self, db_path: str) -> None:
+        """
+        데이터베이스 파일 경로를 받아 연결을 초기화합니다.
+        
+        Args:
+            db_path: SQLite DB 파일 경로
+        """
         self.db_path = Path(db_path)
+        # DB 파일이 들어갈 디렉토리가 없으면 생성합니다.
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 멀티스레드 환경에서의 안전한 접근을 위한 락(Lock)
         self._lock = threading.RLock()
         self._transaction_depth = 0
+        
+        # SQLite 연결 설정 (WAL 모드 등을 활성화하여 성능 및 동시성 향상)
         self._connection = sqlite3.connect(self.db_path, check_same_thread=False)
-        self._connection.row_factory = sqlite3.Row
-        self._connection.execute("PRAGMA foreign_keys = ON;")
-        self._connection.execute("PRAGMA journal_mode = WAL;")
-        self._connection.execute("PRAGMA busy_timeout = 5000;")
+        self._connection.row_factory = sqlite3.Row  # 결과를 딕셔너리처럼 접근할 수 있게 합니다.
+        self._connection.execute("PRAGMA foreign_keys = ON;")  # 외래 키 제약 조건 활성화
+        self._connection.execute("PRAGMA journal_mode = WAL;")  # Write-Ahead Logging 활성화
+        self._connection.execute("PRAGMA busy_timeout = 5000;")  # DB 잠금 시 대기 시간 설정
 
     def init_schema(self) -> None:
+        """
+        정의된 스키마 SQL을 실행하여 테이블과 인덱스를 생성하고 버전을 관리합니다.
+        """
         with self._lock:
             version = self._get_user_version()
             migrations = (
@@ -349,17 +378,23 @@ class Database:
             )
             for target_version, migration_sql in migrations:
                 if version < target_version:
+                    # 지정된 버전까지 순차적으로 마이그레이션 실행
                     self._connection.executescript(migration_sql)
                     self._connection.execute(f"PRAGMA user_version = {target_version};")
                     version = target_version
             self._connection.commit()
 
     def _get_user_version(self) -> int:
+        """현재 DB의 스키마 버전을 가져옵니다."""
         row = self._connection.execute("PRAGMA user_version;").fetchone()
         return int(row[0])
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
+        """
+        트랜잭션 관리를 위한 컨텍스트 매니저입니다.
+        예외 발생 시 롤백(Rollback)하고, 성공 시 커밋(Commit)합니다.
+        """
         with self._lock:
             is_outer_transaction = self._transaction_depth == 0
             if is_outer_transaction:
@@ -379,6 +414,7 @@ class Database:
                     self._connection.commit()
 
     def execute(self, query: str, params: tuple = ()) -> sqlite3.Cursor:
+        """SQL 쿼리를 실행합니다."""
         with self._lock:
             cursor = self._connection.execute(query, params)
             if self._transaction_depth == 0:
@@ -386,13 +422,16 @@ class Database:
             return cursor
 
     def fetchone(self, query: str, params: tuple = ()) -> sqlite3.Row | None:
+        """쿼리 실행 결과 중 첫 번째 행을 반환합니다."""
         with self._lock:
             return self._connection.execute(query, params).fetchone()
 
     def fetchall(self, query: str, params: tuple = ()) -> list[sqlite3.Row]:
+        """쿼리 실행 결과의 모든 행을 반환합니다."""
         with self._lock:
             return self._connection.execute(query, params).fetchall()
 
     def close(self) -> None:
+        """데이터베이스 연결을 닫습니다."""
         with self._lock:
             self._connection.close()

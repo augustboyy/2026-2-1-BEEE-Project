@@ -1,3 +1,9 @@
+"""
+이 파일은 데이터 저장소(Repository) 패턴을 구현합니다.
+데이터베이스와의 직접적인 상호작용을 담당하며, 데이터를 조회, 저장, 수정하는 비즈니스 로직을 제공합니다.
+또한, DB에서 읽어온 원본 데이터를 애플리케이션에서 사용하기 좋은 딕셔너리 형태로 가공합니다.
+"""
+
 from __future__ import annotations
 
 import json
@@ -7,18 +13,25 @@ from typing import Any
 from app.db import Database
 
 
+# JSON 문자열로 저장된 필드 중 리스트 형태인 것들을 정의합니다.
 JSON_LIST_KEYS = {"observed_issues_json"}
 
 
 def utc_now_iso() -> str:
+    """현재 시간을 UTC 기준 ISO 포맷 문자열로 반환합니다."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def _json_dumps(value: Any, default: Any) -> str:
+    """데이터를 JSON 문자열로 변환합니다. 값이 없으면 기본값을 사용합니다."""
     return json.dumps(default if value is None else value, ensure_ascii=False)
 
 
 def _to_dict(row) -> dict[str, Any] | None:
+    """
+    SQLite의 Row 객체를 파이썬 딕셔너리로 변환하고,
+    _json으로 끝나는 필드들을 파싱하여 실제 객체로 복원합니다.
+    """
     if row is None:
         return None
 
@@ -38,11 +51,16 @@ def _to_dict(row) -> dict[str, Any] | None:
 
 
 class PlantRepository:
+    """
+    식물 관련 데이터 처리를 전담하는 저장소 클래스입니다.
+    """
     def __init__(self, database: Database) -> None:
         self.database = database
 
     def create_plant(self, name: str, species: str | None = None, location: str | None = None) -> dict[str, Any]:
+        """새로운 식물을 데이터베이스에 등록합니다."""
         created_at = utc_now_iso()
+        # 새 식물을 등록할 때 기존 활성 식물들을 비활성화합니다.
         self.database.execute("UPDATE plants SET is_active = 0 WHERE is_active = 1")
         cursor = self.database.execute(
             """
@@ -62,6 +80,7 @@ class PlantRepository:
         return self.get_plant(plant_id)
 
     def ensure_latest_state(self, plant_id: int) -> None:
+        """식물의 최신 상태를 담을 레코드가 존재하는지 확인하고 없으면 생성합니다."""
         self.database.execute(
             """
             INSERT INTO latest_state (plant_id, updated_at)
@@ -72,6 +91,7 @@ class PlantRepository:
         )
 
     def update_latest_state(self, plant_id: int, **fields: Any) -> None:
+        """식물의 최신 요약 상태를 업데이트합니다."""
         self.ensure_latest_state(plant_id)
         fields = {key: value for key, value in fields.items()}
         fields["updated_at"] = utc_now_iso()
@@ -83,6 +103,7 @@ class PlantRepository:
         )
 
     def list_plants(self) -> list[dict[str, Any]]:
+        """모든 식물 목록을 최신 상태와 함께 가져옵니다."""
         rows = self.database.fetchall(
             """
             SELECT p.*, ls.latest_health_status, ls.ai_updated_at
@@ -94,16 +115,19 @@ class PlantRepository:
         return [_to_dict(row) for row in rows]
 
     def get_plant(self, plant_id: int) -> dict[str, Any] | None:
+        """식물 ID로 상세 정보를 조회합니다."""
         row = self.database.fetchone("SELECT * FROM plants WHERE id = ?", (plant_id,))
         return _to_dict(row)
 
     def get_current_plant(self) -> dict[str, Any] | None:
+        """현재 활성화되어 모니터링 중인 식물을 가져옵니다."""
         row = self.database.fetchone(
             "SELECT * FROM plants WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1"
         )
         return _to_dict(row)
 
     def activate_plant(self, plant_id: int) -> dict[str, Any] | None:
+        """특정 식물을 현재 활성 상태로 전환합니다."""
         plant = self.get_plant(plant_id)
         if plant is None:
             return None
@@ -112,6 +136,7 @@ class PlantRepository:
         self.add_activity(plant_id, "plant_activated", f"{plant['name']} 식물을 현재 작업 대상으로 전환했습니다.")
         return self.get_plant(plant_id)
 
+    # --- 종(Species) 프로필 관리 ---
     def create_or_update_species_profile(
         self,
         species_name: str,
@@ -128,6 +153,7 @@ class PlantRepository:
         watering_interval_days: int | None = None,
         care_notes: dict[str, Any] | list[Any] | None = None,
     ) -> dict[str, Any]:
+        """식물 종에 대한 권장 환경 정보(가이드라인)를 저장하거나 수정합니다."""
         clean_species_name = species_name.strip()
         if not clean_species_name:
             raise ValueError("species_name is required.")
@@ -193,6 +219,7 @@ class PlantRepository:
         )
         return _to_dict(row)
 
+    # --- 사진 업로드 관리 ---
     def save_uploaded_image(
         self,
         plant_id: int,
@@ -200,6 +227,7 @@ class PlantRepository:
         original_name: str,
         mime_type: str,
     ) -> dict[str, Any]:
+        """업로드된 식물 사진 메타데이터를 DB에 저장합니다."""
         created_at = utc_now_iso()
         cursor = self.database.execute(
             """
@@ -229,6 +257,7 @@ class PlantRepository:
         )
         return _to_dict(row)
 
+    # --- 카메라 캡처 관리 ---
     def save_camera_capture(
         self,
         plant_id: int,
@@ -240,6 +269,7 @@ class PlantRepository:
         metadata: dict[str, Any] | None = None,
         captured_at: str | None = None,
     ) -> dict[str, Any]:
+        """카메라 모듈 등을 통해 캡처된 이미지 정보를 저장합니다."""
         now = utc_now_iso()
         cursor = self.database.execute(
             """
@@ -267,7 +297,7 @@ class PlantRepository:
         self.add_activity(
             plant_id,
             "camera_capture_saved",
-            "Camera capture was saved.",
+            "카메라 캡처 사진이 저장되었습니다.",
             {"camera_capture_id": capture_id, "purpose": purpose, "image_id": image_id},
         )
         return self.get_camera_capture(capture_id)
@@ -295,6 +325,7 @@ class PlantRepository:
         )
         return [_to_dict(row) for row in rows]
 
+    # --- 센서 로그 관리 ---
     def add_sensor_log(
         self,
         plant_id: int,
@@ -304,6 +335,7 @@ class PlantRepository:
         light_level: float | None,
         source: str,
     ) -> dict[str, Any]:
+        """센서로부터 수신한 데이터를 로그로 저장하고 최신 상태를 갱신합니다."""
         received_at = utc_now_iso()
         cursor = self.database.execute(
             """
@@ -314,6 +346,7 @@ class PlantRepository:
             (plant_id, moisture_value, humidity, temperature, light_level, source, received_at),
         )
         log_id = cursor.lastrowid
+        # 최신 센서 상태 테이블 업데이트
         self.database.execute(
             """
             INSERT INTO latest_sensor_state
@@ -370,6 +403,7 @@ class PlantRepository:
         )
         return [_to_dict(row) for row in rows]
 
+    # --- 급수 로그 관리 ---
     def add_watering_log(
         self,
         plant_id: int,
@@ -380,6 +414,7 @@ class PlantRepository:
         started_at: str | None = None,
         ended_at: str | None = None,
     ) -> dict[str, Any]:
+        """급수 실행 기록을 저장합니다."""
         now = datetime.now(timezone.utc)
         started = started_at or now.isoformat()
         if ended_at:
@@ -439,70 +474,7 @@ class PlantRepository:
         )
         return [_to_dict(row) for row in rows]
 
-    def _add_analysis_result_legacy(
-        self,
-        plant_id: int,
-        job_id: str,
-        image_id: int | None,
-        provider: str,
-        model_name: str,
-        request_note: str | None,
-        prompt_text: str,
-        response_json: dict[str, Any],
-        raw_response_text: str,
-        camera_capture_id: int | None = None,
-    ) -> dict[str, Any]:
-        created_at = utc_now_iso()
-        cursor = self.database.execute(
-            """
-            INSERT INTO analysis_results
-            (
-                plant_id, job_id, image_id, provider, model_name, request_note, prompt_text,
-                response_json, raw_response_text, health_status, condition_summary, advice,
-                observed_issues_json, watering_need, confidence, created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                plant_id,
-                job_id,
-                image_id,
-                provider,
-                model_name,
-                request_note,
-                prompt_text,
-                json.dumps(response_json, ensure_ascii=False),
-                raw_response_text,
-                response_json["health_status"],
-                response_json["condition_summary"],
-                response_json["advice"],
-                json.dumps(response_json["observed_issues"], ensure_ascii=False),
-                response_json["watering_need"],
-                response_json["confidence"],
-                created_at,
-            ),
-        )
-        analysis_id = cursor.lastrowid
-        self.update_latest_state(
-            plant_id,
-            latest_analysis_id=analysis_id,
-            latest_image_id=image_id,
-            latest_health_status=response_json["health_status"],
-            latest_condition_summary=response_json["condition_summary"],
-            latest_advice=response_json["advice"],
-            latest_watering_need=response_json["watering_need"],
-            latest_confidence=response_json["confidence"],
-            ai_updated_at=created_at,
-            ai_confirmed_at=None,
-        )
-        self.add_activity(
-            plant_id,
-            "analysis_saved",
-            "외부 AI 분석 결과가 저장되었습니다.",
-            {"analysis_id": analysis_id, "provider": provider, "health_status": response_json["health_status"]},
-        )
-        return self.get_analysis_result(analysis_id)
-
+    # --- AI 분석 결과 관리 ---
     def add_analysis_result(
         self,
         plant_id: int,
@@ -516,6 +488,7 @@ class PlantRepository:
         raw_response_text: str,
         camera_capture_id: int | None = None,
     ) -> dict[str, Any]:
+        """AI의 사진 분석 결과를 저장하고 필요 시 알림(Alert)을 생성합니다."""
         created_at = utc_now_iso()
         with self.database.transaction():
             cursor = self.database.execute(
@@ -548,6 +521,7 @@ class PlantRepository:
                 ),
             )
             analysis_id = cursor.lastrowid
+            # 최신 상태 업데이트
             self.update_latest_state(
                 plant_id,
                 latest_analysis_id=analysis_id,
@@ -560,13 +534,14 @@ class PlantRepository:
                 ai_updated_at=created_at,
                 ai_confirmed_at=None,
             )
+            # 건강 상태가 주의나 위험이면 알림 생성
             if response_json["health_status"] in {"warning", "critical"}:
                 self.create_ai_alert(
                     plant_id=plant_id,
                     analysis_id=analysis_id,
                     camera_capture_id=camera_capture_id,
                     severity=response_json["health_status"],
-                    title="AI diagnosis requires attention",
+                    title="AI 진단 결과 주의가 필요합니다.",
                     message=response_json["condition_summary"],
                     alert_type="diagnosis",
                     metadata={
@@ -578,7 +553,7 @@ class PlantRepository:
             self.add_activity(
                 plant_id,
                 "analysis_saved",
-                "AI analysis result was saved.",
+                "AI 사진 분석 결과가 저장되었습니다.",
                 {"analysis_id": analysis_id, "provider": provider, "health_status": response_json["health_status"]},
             )
         return self.get_analysis_result(analysis_id)
@@ -594,25 +569,8 @@ class PlantRepository:
         )
         return _to_dict(row)
 
-    def _confirm_analysis_legacy(self, analysis_id: int) -> dict[str, Any] | None:
-        analysis = self.get_analysis_result(analysis_id)
-        if analysis is None:
-            return None
-        confirmed_at = utc_now_iso()
-        self.database.execute(
-            "UPDATE analysis_results SET confirmed_at = ? WHERE id = ?",
-            (confirmed_at, analysis_id),
-        )
-        self.update_latest_state(analysis["plant_id"], ai_confirmed_at=confirmed_at)
-        self.add_activity(
-            analysis["plant_id"],
-            "analysis_confirmed",
-            "사용자가 최신 AI 분석 결과를 확인했습니다.",
-            {"analysis_id": analysis_id},
-        )
-        return self.get_analysis_result(analysis_id)
-
     def confirm_analysis(self, analysis_id: int) -> dict[str, Any] | None:
+        """사용자가 AI 분석 결과를 확인했음을 기록하고 관련 알림을 종료합니다."""
         analysis = self.get_analysis_result(analysis_id)
         if analysis is None:
             return None
@@ -624,6 +582,7 @@ class PlantRepository:
                 (confirmed_at, analysis_id),
             )
             self.update_latest_state(analysis["plant_id"], ai_confirmed_at=confirmed_at)
+            # 관련 오픈된 알림들을 모두 완료 상태로 변경
             open_alerts = self.database.fetchall(
                 """
                 SELECT * FROM ai_alerts
@@ -635,7 +594,7 @@ class PlantRepository:
             for alert_row in open_alerts:
                 self.complete_ai_alert(
                     int(alert_row["id"]),
-                    note="Analysis was confirmed.",
+                    note="분석 결과 확인됨.",
                     actor="user",
                     action_type="analysis_confirmed",
                     metadata={"analysis_id": analysis_id},
@@ -643,7 +602,7 @@ class PlantRepository:
             self.add_activity(
                 analysis["plant_id"],
                 "analysis_confirmed",
-                "User confirmed the latest AI analysis.",
+                "사용자가 AI 분석 결과를 확인했습니다.",
                 {"analysis_id": analysis_id},
             )
         return self.get_analysis_result(analysis_id)
@@ -660,6 +619,7 @@ class PlantRepository:
         )
         return [_to_dict(row) for row in rows]
 
+    # --- AI 알림(Alert) 관리 ---
     def create_ai_alert(
         self,
         plant_id: int,
@@ -671,6 +631,7 @@ class PlantRepository:
         alert_type: str = "diagnosis",
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """시스템에 중요한 알림을 생성합니다."""
         now = utc_now_iso()
         with self.database.transaction():
             cursor = self.database.execute(
@@ -698,7 +659,7 @@ class PlantRepository:
             self.add_activity(
                 plant_id,
                 "ai_alert_opened",
-                "AI alert was opened.",
+                "AI 알림이 발생했습니다.",
                 {"alert_id": alert_id, "analysis_id": analysis_id, "severity": severity},
             )
         return self.get_ai_alert(alert_id)
@@ -708,6 +669,7 @@ class PlantRepository:
         return _to_dict(row)
 
     def get_open_alerts(self, plant_id: int | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        """해결되지 않은(Open) 알림 목록을 가져옵니다."""
         if plant_id is None:
             rows = self.database.fetchall(
                 """
@@ -750,6 +712,7 @@ class PlantRepository:
         action_type: str = "completed",
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
+        """알림을 완료/해결 상태로 변경합니다."""
         alert = self.get_ai_alert(alert_id)
         if alert is None:
             return None
@@ -786,22 +749,12 @@ class PlantRepository:
             self.add_activity(
                 alert["plant_id"],
                 "ai_alert_completed",
-                "AI alert was completed.",
+                "AI 알림이 해결되었습니다.",
                 {"alert_id": alert_id, "action_type": action_type, "actor": actor},
             )
         return self.get_ai_alert(alert_id)
 
-    def list_alert_actions(self, alert_id: int) -> list[dict[str, Any]]:
-        rows = self.database.fetchall(
-            """
-            SELECT * FROM alert_actions
-            WHERE alert_id = ?
-            ORDER BY created_at DESC
-            """,
-            (alert_id,),
-        )
-        return [_to_dict(row) for row in rows]
-
+    # --- 공통 로그(Activity, Error) 관리 ---
     def get_latest_state(self, plant_id: int) -> dict[str, Any] | None:
         row = self.database.fetchone("SELECT * FROM latest_state WHERE plant_id = ?", (plant_id,))
         return _to_dict(row)
@@ -813,6 +766,7 @@ class PlantRepository:
         message: str,
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        """일반 활동 로그를 기록합니다."""
         self.database.execute(
             """
             INSERT INTO activity_logs (plant_id, category, message, metadata_json, created_at)
@@ -852,6 +806,7 @@ class PlantRepository:
         metadata: dict[str, Any] | None = None,
         plant_id: int | None = None,
     ) -> None:
+        """에러 로그를 기록합니다."""
         self.database.execute(
             """
             INSERT INTO error_logs (plant_id, source, message, metadata_json, created_at)
@@ -884,6 +839,7 @@ class PlantRepository:
             )
         return [_to_dict(row) for row in rows]
 
+    # --- 기타 확장 기능 (관리 가이드, 질문 답변, 급수 규칙 등) ---
     def save_care_guide(
         self,
         plant_id: int,
@@ -894,6 +850,7 @@ class PlantRepository:
         guide_type: str = "general",
         species_profile_id: int | None = None,
     ) -> dict[str, Any]:
+        """AI가 생성한 식물 관리 가이드를 저장합니다."""
         now = utc_now_iso()
         cursor = self.database.execute(
             """
@@ -919,7 +876,7 @@ class PlantRepository:
         self.add_activity(
             plant_id,
             "care_guide_saved",
-            "Care guide was saved.",
+            "관리 가이드가 저장되었습니다.",
             {"care_guide_id": guide_id, "guide_type": guide_type},
         )
         return self.get_care_guide(guide_id)
@@ -944,6 +901,7 @@ class PlantRepository:
         model_name: str | None = None,
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """사용자의 질문과 AI의 답변 쌍을 저장합니다."""
         created_at = utc_now_iso()
         cursor = self.database.execute(
             """
@@ -966,7 +924,7 @@ class PlantRepository:
         self.add_activity(
             plant_id,
             "user_question_saved",
-            "User question and AI answer were saved.",
+            "식물 관련 질문과 AI 답변이 저장되었습니다.",
             {"user_question_id": question_id, "provider": provider},
         )
         return self.get_user_question(question_id)
@@ -999,6 +957,7 @@ class PlantRepository:
         amount_ml: float | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """자동 급수 등을 위한 규칙을 설정합니다."""
         now = utc_now_iso()
         self.database.execute(
             """
@@ -1036,7 +995,7 @@ class PlantRepository:
         self.add_activity(
             plant_id,
             "watering_rule_saved",
-            "Watering rule was saved.",
+            "급수 규칙이 설정되었습니다.",
             {"mode": mode, "is_enabled": is_enabled},
         )
         return self.get_watering_rule(plant_id)
@@ -1060,6 +1019,7 @@ class PlantRepository:
         reason: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """급수 시스템에서 발생한 구체적인 이벤트(트리거 등)를 기록합니다."""
         now = utc_now_iso()
         cursor = self.database.execute(
             """
@@ -1090,7 +1050,7 @@ class PlantRepository:
         self.add_activity(
             plant_id,
             "watering_event_created",
-            "Watering event was created.",
+            "급수 이벤트가 생성되었습니다.",
             {"watering_event_id": event_id, "event_type": event_type, "status": status},
         )
         return self.get_watering_event(event_id)
@@ -1127,6 +1087,7 @@ class PlantRepository:
         metadata: dict[str, Any] | None = None,
         received_at: str | None = None,
     ) -> dict[str, Any]:
+        """장치의 상태(온라인/오프라인 등)를 기록하는 하트비트 기능입니다."""
         now = utc_now_iso()
         cursor = self.database.execute(
             """
@@ -1174,7 +1135,9 @@ class PlantRepository:
             )
         return [_to_dict(row) for row in rows]
 
+    # --- 대시보드 데이터 빌더 ---
     def get_counts(self, plant_id: int) -> dict[str, int]:
+        """분석, 센서, 급수 로그의 총 개수를 가져옵니다."""
         analysis_count = self.database.fetchone(
             "SELECT COUNT(*) AS count FROM analysis_results WHERE plant_id = ?",
             (plant_id,),
@@ -1194,6 +1157,9 @@ class PlantRepository:
         }
 
     def build_dashboard(self, plant_id: int) -> dict[str, Any] | None:
+        """
+        특정 식물에 대한 모든 최신 데이터와 이력을 모아 대시보드용 큰 딕셔너리를 구성합니다.
+        """
         plant = self.get_plant(plant_id)
         if plant is None:
             return None

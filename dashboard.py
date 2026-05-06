@@ -1,3 +1,8 @@
+"""
+이 파일은 Streamlit을 사용하여 구현된 모니터링 대시보드입니다.
+사용자에게 식물의 상태, AI 분석 결과, 센서 데이터 및 급수 이력을 시각적으로 보여줍니다.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -11,6 +16,7 @@ from app.bootstrap import build_runtime
 from app.config import load_settings
 
 
+# 상태값에 따른 레이블과 색상 설정
 STATUS_META = {
     "healthy": {"label": "안정", "color": "#2f7d4a"},
     "warning": {"label": "주의", "color": "#d97706"},
@@ -18,6 +24,7 @@ STATUS_META = {
     None: {"label": "대기", "color": "#3558ff"},
 }
 
+# 급수 필요도 레이블 설정
 WATERING_META = {
     "low": "낮음",
     "medium": "보통",
@@ -28,10 +35,24 @@ WATERING_META = {
 
 @st.cache_resource
 def get_runtime():
+    """
+    애플리케이션 실행에 필요한 런타임 객체(DB, Repository 등)를 생성하고 캐싱합니다.
+    """
     return build_runtime()
 
 
 def api_request(method: str, path: str, **kwargs) -> dict[str, Any]:
+    """
+    FastAPI 서버에 HTTP 요청을 보내는 헬퍼 함수입니다.
+    
+    Args:
+        method: HTTP 메서드 (GET, POST 등)
+        path: 요청할 API 경로
+        **kwargs: 추가적인 요청 인자 (json, data, files 등)
+        
+    Returns:
+        JSON 응답 데이터를 딕셔너리로 반환
+    """
     settings = load_settings()
     with httpx.Client(base_url=settings.api_base_url, timeout=60) as client:
         response = client.request(method, path, **kwargs)
@@ -49,6 +70,9 @@ def api_request(method: str, path: str, **kwargs) -> dict[str, Any]:
 
 
 def fmt_time(value: str | None) -> str:
+    """
+    ISO 포맷의 시간 문자열을 읽기 좋은 형식으로 변환합니다.
+    """
     if not value:
         return "-"
     dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -56,6 +80,9 @@ def fmt_time(value: str | None) -> str:
 
 
 def apply_page_style() -> None:
+    """
+    대시보드의 전반적인 CSS 스타일을 적용합니다.
+    """
     st.markdown(
         """
         <style>
@@ -88,6 +115,9 @@ def apply_page_style() -> None:
 
 
 def render_start_screen() -> None:
+    """
+    대시보드 초기 진입 시 보여주는 시작 화면을 렌더링합니다.
+    """
     st.markdown(
         """
         <div class="hero-box">
@@ -110,6 +140,9 @@ def render_start_screen() -> None:
 
 
 def render_registration_form() -> None:
+    """
+    새로운 식물을 등록하기 위한 폼을 렌더링합니다.
+    """
     st.subheader("식물 등록")
     with st.form("register_plant"):
         name = st.text_input("식물 이름", placeholder="예: 몬스테라")
@@ -136,11 +169,17 @@ def render_registration_form() -> None:
 
 
 def plant_label(plant: dict[str, Any]) -> str:
+    """
+    셀렉트박스 등에 표시될 식물의 레이블을 생성합니다.
+    """
     status = plant.get("latest_health_status") or "대기"
     return f"{plant['name']} ({status})"
 
 
 def render_sidebar(runtime) -> dict[str, Any] | None:
+    """
+    사이드바를 렌더링하고 선택된 식물 정보를 반환합니다.
+    """
     st.sidebar.title("대시보드 제어")
     st.sidebar.caption("센서 수집과 AI 분석 결과는 SQLite에 저장됩니다.")
     plants = runtime.repository.list_plants()
@@ -154,6 +193,7 @@ def render_sidebar(runtime) -> dict[str, Any] | None:
     if not plants:
         return None
 
+    # 현재 활성화된 식물 또는 첫 번째 식물을 기본값으로 설정
     active_plant = runtime.repository.get_current_plant() or plants[0]
     labels = [plant_label(plant) for plant in plants]
     active_index = next((index for index, plant in enumerate(plants) if plant["id"] == active_plant["id"]), 0)
@@ -161,6 +201,7 @@ def render_sidebar(runtime) -> dict[str, Any] | None:
     selected_plant = plants[labels.index(chosen_label)]
     st.session_state.selected_plant_id = selected_plant["id"]
 
+    # 선택된 식물이 활성 세션이 아닌 경우 전환 버튼 표시
     if not selected_plant["is_active"]:
         if st.sidebar.button("이 식물을 활성 세션으로 전환", use_container_width=True):
             api_request("POST", "/api/plants/activate", json={"plant_id": selected_plant["id"]})
@@ -175,6 +216,9 @@ def render_sidebar(runtime) -> dict[str, Any] | None:
 
 
 def render_status_banner(dashboard: dict[str, Any]) -> None:
+    """
+    식물의 현재 상태 요약을 보여주는 상단 배너를 렌더링합니다.
+    """
     latest_state = dashboard.get("latest_state") or {}
     latest_analysis = dashboard.get("latest_analysis") or {}
     meta = STATUS_META.get(latest_state.get("latest_health_status"), STATUS_META[None])
@@ -197,6 +241,9 @@ def render_status_banner(dashboard: dict[str, Any]) -> None:
 
 
 def render_metrics(dashboard: dict[str, Any]) -> None:
+    """
+    주요 지표(수분, 온습도, 급수 필요도 등)를 카드 형태로 렌더링합니다.
+    """
     sensor = dashboard.get("latest_sensor_state") or {}
     latest_state = dashboard.get("latest_state") or {}
     watering = dashboard.get("latest_watering_log") or {}
@@ -221,6 +268,9 @@ def render_metrics(dashboard: dict[str, Any]) -> None:
 
 
 def render_overview_tab(dashboard: dict[str, Any]) -> None:
+    """
+    '현재 상태' 탭의 내용을 렌더링합니다. (기본 정보 및 AI 분석 결과)
+    """
     left, right = st.columns([0.95, 1.05])
     latest_analysis = dashboard.get("latest_analysis") or {}
     latest_image = dashboard.get("latest_uploaded_image") or {}
@@ -274,6 +324,9 @@ def render_overview_tab(dashboard: dict[str, Any]) -> None:
 
 
 def render_photo_upload_form(plant_id: int) -> None:
+    """
+    사진 업로드 및 AI 분석 요청을 위한 폼을 렌더링합니다.
+    """
     st.markdown("<div class='section-box'>", unsafe_allow_html=True)
     st.subheader("식물 사진 업로드 분석")
     with st.form("photo_upload_form"):
@@ -299,6 +352,9 @@ def render_photo_upload_form(plant_id: int) -> None:
 
 
 def render_sensor_form(plant_id: int) -> None:
+    """
+    수동 센서 데이터 입력 또는 데모 데이터 생성을 위한 폼을 렌더링합니다.
+    """
     st.markdown("<div class='section-box'>", unsafe_allow_html=True)
     st.subheader("센서 입력 / 데모 생성")
     with st.form("sensor_form"):
@@ -330,6 +386,9 @@ def render_sensor_form(plant_id: int) -> None:
 
 
 def render_watering_form(plant_id: int) -> None:
+    """
+    급수 기록을 수동으로 입력하기 위한 폼을 렌더링합니다.
+    """
     st.markdown("<div class='section-box'>", unsafe_allow_html=True)
     st.subheader("급수 기록")
     with st.form("watering_form"):
@@ -355,6 +414,9 @@ def render_watering_form(plant_id: int) -> None:
 
 
 def render_history_tab(dashboard: dict[str, Any]) -> None:
+    """
+    '상세 이력' 탭을 렌더링합니다. (차트 및 테이블)
+    """
     st.subheader("센서 / AI / 급수 이력")
     sensor_logs = list(reversed(dashboard.get("recent_sensor_logs", [])))
     if sensor_logs:
@@ -387,6 +449,9 @@ def render_history_tab(dashboard: dict[str, Any]) -> None:
 
 
 def render_system_tab(dashboard: dict[str, Any]) -> None:
+    """
+    '전체 현황' 탭을 렌더링합니다. (시스템 정보 및 활동 로그)
+    """
     st.subheader("전체 현황과 시스템 로그")
     overview_df = pd.DataFrame(dashboard.get("plant_overview", []))
     if not overview_df.empty:
@@ -406,6 +471,10 @@ def render_system_tab(dashboard: dict[str, Any]) -> None:
 
 
 def main() -> None:
+    """
+    대시보드의 메인 실행 함수입니다.
+    페이지 설정, 런타임 초기화, 서버 연결 확인 및 메인 UI 렌더링을 담당합니다.
+    """
     st.set_page_config(page_title="Plant Pulse Vision Dashboard", layout="wide")
     apply_page_style()
     runtime = get_runtime()
@@ -417,6 +486,7 @@ def main() -> None:
     st.caption("사진 분석은 외부 AI HTTP API로 보내고, 결과는 SQLite에 저장한 뒤 대시보드에 다시 표시합니다.")
 
     try:
+        # API 서버 상태 확인
         health = api_request("GET", "/api/health")
         st.success(
             f"API 연결됨 | AI 제공자: {health['ai_provider']} | 센서 루프: {'ON' if health['sensor_loop_enabled'] else 'OFF'}"
@@ -426,11 +496,13 @@ def main() -> None:
         st.info("먼저 `python start_project.py` 또는 FastAPI 서버를 실행해 주세요.")
         return
 
+    # 식물이 등록되지 않았거나 등록 폼을 열었을 때
     if selected_plant is None or st.session_state.show_register:
         render_start_screen()
         render_registration_form()
         return
 
+    # 대시보드 데이터 구성 및 렌더링
     dashboard = runtime.repository.build_dashboard(selected_plant["id"])
     if dashboard is None:
         st.error("선택한 식물의 대시보드를 불러오지 못했습니다.")
