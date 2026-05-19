@@ -8,4 +8,5 @@ __pycache__/
 .env*
 runs/
 # SQLite Database
+data/*.db
 data/*.db*
