@@ -1,20 +1,19 @@
 """
-이 파일은 외부 AI 서비스(OpenAI GPT, Google Gemini 등)와 통신하는 클라이언트를 정의합니다.
-식물 사진과 센서 데이터를 AI에게 보내 분석 결과를 받아오고,
-받은 결과를 애플리케이션에서 사용하기 적합한 형식으로 정규화(Normalization)합니다.
+이 파일은 Google Gemini AI 서비스를 호출하여 식물을 분석하는 클라이언트를 정의합니다.
+이미지 분석 전문가 페르소나를 사용하여 식물의 건강 상태와 점수를 분석합니다.
 """
 
 from __future__ import annotations
 
-import base64
 import json
 import re
 from typing import Any
+from io import BytesIO
 
-import httpx
+from google import genai
+from PIL import Image
 
 from app.config import Settings
-from app.services.mock_ai import build_mock_photo_analysis
 
 
 # AI로부터 받아올 JSON 데이터의 구조(Schema)를 정의합니다.
@@ -24,6 +23,11 @@ ANALYSIS_SCHEMA = {
         "health_status": {
             "type": "string",
             "enum": ["healthy", "warning", "critical"],
+        },
+        "health_score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
         },
         "condition_summary": {"type": "string"},
         "advice": {"type": "string"},
@@ -39,6 +43,7 @@ ANALYSIS_SCHEMA = {
     },
     "required": [
         "health_status",
+        "health_score",
         "condition_summary",
         "advice",
         "observed_issues",
@@ -50,10 +55,14 @@ ANALYSIS_SCHEMA = {
 
 
 class AIClient:
-    """외부 AI API와의 통신을 담당하는 클라이언트 클래스입니다."""
+    """Google Gemini API와의 통신을 담당하는 클라이언트 클래스입니다."""
     
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        # Google GenAI 클라이언트 초기화
+        self.client = genai.Client(api_key=self.settings.gemini_api_key)
+        # 사용할 모델 설정 (settings에 정의된 모델 사용)
+        self.model_id = self.settings.gemini_model
 
     async def analyze_plant_photo(
         self,
@@ -65,28 +74,40 @@ class AIClient:
         note: str | None = None,
     ) -> dict[str, Any]:
         """
-        설정된 제공자(Provider)에 따라 적절한 AI 엔진을 호출하여 식물을 분석합니다.
+        Gemini를 호출하여 식물을 분석합니다.
         """
-        # 1. Mock 모드 (테스트용)
-        if self.settings.ai_provider == "mock":
-            result = build_mock_photo_analysis(plant["name"], latest_sensor, latest_watering, note)
+        if not self.settings.gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY가 설정되지 않았습니다.")
+
+        # 이미지 처리 (PIL을 사용하여 최적화)
+        img = Image.open(BytesIO(image_bytes))
+        img.thumbnail((2048, 2048))
+
+        prompt = self._build_prompt(plant, latest_sensor, latest_watering, note)
+        
+        try:
+            # Gemini 모델 호출
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=[prompt, img],
+                config={
+                    "temperature": 0.2,
+                    "response_mime_type": "application/json",
+                }
+            )
+            
+            raw_text = response.text
+            parsed_json = self._extract_json(raw_text)
+            
             return {
-                "provider": "mock",
-                "model_name": "demo-photo-analyzer",
-                "prompt_text": self._build_prompt(plant, latest_sensor, latest_watering, note),
-                "result": result,
-                "raw_response_text": json.dumps(result, ensure_ascii=False),
+                "provider": "gemini",
+                "model_name": self.model_id,
+                "prompt_text": prompt,
+                "result": self._normalize_result(parsed_json),
+                "raw_response_text": raw_text,
             }
-
-        # 2. OpenAI 모드
-        if self.settings.ai_provider == "openai":
-            return await self._analyze_with_openai(plant, image_bytes, mime_type, latest_sensor, latest_watering, note)
-
-        # 3. Gemini 모드
-        if self.settings.ai_provider == "gemini":
-            return await self._analyze_with_gemini(plant, image_bytes, mime_type, latest_sensor, latest_watering, note)
-
-        raise RuntimeError(f"지원하지 않는 AI 제공자입니다: {self.settings.ai_provider}")
+        except Exception as e:
+            raise RuntimeError(f"Gemini API 호출 중 오류 발생: {str(e)}")
 
     def _build_prompt(
         self,
@@ -99,138 +120,28 @@ class AIClient:
         sensor_text = json.dumps(latest_sensor or {}, ensure_ascii=False)
         watering_text = json.dumps(latest_watering or {}, ensure_ascii=False)
         note_text = note.strip() if note else "없음"
+        
         return (
-            "당신은 식물 상태를 분석하는 전문가입니다. 업로드된 식물 사진을 보고 건강 상태를 분석하세요. "
-            "최근 센서값과 급수 기록도 함께 고려하세요. 반드시 JSON만 반환하세요. "
-            "필드: health_status(healthy|warning|critical), condition_summary, advice, "
-            "observed_issues(string array), watering_need(low|medium|high), confidence(0~1).\n"
+            "당신은 식물 병해충 및 생육 상태를 분석하는 20년 경력의 수목의학 전문가이자 식물 클리닉 원장입니다. "
+            "현재 식물에 이상이 감지되어 정밀 진단이 필요한 상황입니다. "
+            "제공된 사진과 환경 데이터를 바탕으로 전문가의 시각에서 식물을 철저히 분석하세요.\n\n"
+            "반드시 아래의 JSON 형식을 지켜 답변하세요:\n"
+            "{\n"
+            '  "health_status": "healthy" | "warning" | "critical",\n'
+            '  "health_score": 0~100 사이의 정수 (100점 만점 기준의 건강도 점수),\n'
+            '  "condition_summary": "현재 식물 상태에 대한 전문가적 요약",\n'
+            '  "advice": "구체적이고 실천 가능한 조치 방안",\n'
+            '  "observed_issues": ["감지된 문제점 리스트"],\n'
+            '  "watering_need": "low" | "medium" | "high",\n'
+            '  "confidence": 0~1 사이의 신뢰도\n'
+            "}\n\n"
             f"식물 이름: {plant['name']}\n"
             f"식물 종류: {plant.get('species') or '미입력'}\n"
             f"식물 위치: {plant.get('location') or '미입력'}\n"
             f"최근 센서 데이터: {sensor_text}\n"
             f"최근 급수 기록: {watering_text}\n"
-            f"사용자 메모: {note_text}"
+            f"특이 사항: {note_text}"
         )
-
-    async def _analyze_with_openai(
-        self,
-        plant: dict[str, Any],
-        image_bytes: bytes,
-        mime_type: str,
-        latest_sensor: dict[str, Any] | None,
-        latest_watering: dict[str, Any] | None,
-        note: str | None,
-    ) -> dict[str, Any]:
-        """OpenAI GPT-4 Vision API를 호출합니다."""
-        if not self.settings.openai_api_key:
-            raise RuntimeError("OPENAI_API_KEY가 설정되지 않았습니다.")
-
-        encoded = base64.b64encode(image_bytes).decode("utf-8")
-        prompt = self._build_prompt(plant, latest_sensor, latest_watering, note)
-        body = {
-            "model": self.settings.openai_model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You analyze plant photos. Return strict JSON only.",
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime_type};base64,{encoded}"},
-                        },
-                    ],
-                },
-            ],
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "plant_photo_analysis",
-                    "strict": True,
-                    "schema": ANALYSIS_SCHEMA,
-                },
-            },
-            "temperature": 0.2,
-        }
-        headers = {
-            "Authorization": f"Bearer {self.settings.openai_api_key}",
-            "Content-Type": "application/json",
-        }
-
-        async with httpx.AsyncClient(timeout=self.settings.ai_timeout_seconds) as client:
-            response = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=headers,
-                json=body,
-            )
-            response.raise_for_status()
-            payload = response.json()
-
-        raw_text = payload["choices"][0]["message"]["content"]
-        return {
-            "provider": "openai",
-            "model_name": self.settings.openai_model,
-            "prompt_text": prompt,
-            "result": self._normalize_result(self._extract_json(raw_text)),
-            "raw_response_text": raw_text,
-        }
-
-    async def _analyze_with_gemini(
-        self,
-        plant: dict[str, Any],
-        image_bytes: bytes,
-        mime_type: str,
-        latest_sensor: dict[str, Any] | None,
-        latest_watering: dict[str, Any] | None,
-        note: str | None,
-    ) -> dict[str, Any]:
-        """Google Gemini API를 호출합니다."""
-        if not self.settings.gemini_api_key:
-            raise RuntimeError("GEMINI_API_KEY가 설정되지 않았습니다.")
-
-        encoded = base64.b64encode(image_bytes).decode("utf-8")
-        prompt = self._build_prompt(plant, latest_sensor, latest_watering, note)
-        body = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt},
-                        {
-                            "inline_data": {
-                                "mime_type": mime_type,
-                                "data": encoded,
-                            }
-                        },
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.2,
-                "responseMimeType": "application/json",
-            },
-        }
-        headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": self.settings.gemini_api_key,
-        }
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.settings.gemini_model}:generateContent"
-
-        async with httpx.AsyncClient(timeout=self.settings.ai_timeout_seconds) as client:
-            response = await client.post(url, headers=headers, json=body)
-            response.raise_for_status()
-            payload = response.json()
-
-        raw_text = payload["candidates"][0]["content"]["parts"][0]["text"]
-        return {
-            "provider": "gemini",
-            "model_name": self.settings.gemini_model,
-            "prompt_text": prompt,
-            "result": self._normalize_result(self._extract_json(raw_text)),
-            "raw_response_text": raw_text,
-        }
 
     def _extract_json(self, text: str) -> dict[str, Any]:
         """응답 텍스트에서 JSON 부분을 추출하여 파싱합니다."""
@@ -252,6 +163,7 @@ class AIClient:
 
         result = {
             "health_status": str(parsed.get("health_status", "warning")).lower(),
+            "health_score": int(parsed.get("health_score", 0)),
             "condition_summary": str(parsed.get("condition_summary", "")).strip(),
             "advice": str(parsed.get("advice", "")).strip(),
             "observed_issues": [str(item).strip() for item in observed_issues if str(item).strip()],
@@ -262,6 +174,10 @@ class AIClient:
         # 유효하지 않은 값들에 대한 기본값 처리
         if result["health_status"] not in {"healthy", "warning", "critical"}:
             result["health_status"] = "warning"
+        
+        # 점수 범위 제한
+        result["health_score"] = max(0, min(100, result["health_score"]))
+        
         if result["watering_need"] not in {"low", "medium", "high"}:
             result["watering_need"] = "medium"
         result["confidence"] = max(0.0, min(1.0, result["confidence"]))
@@ -271,3 +187,34 @@ class AIClient:
         if not result["advice"]:
             result["advice"] = "사진을 다시 촬영해 분석하거나 최근 센서값과 함께 재요청해 주세요."
         return result
+
+    async def identify_plant_species(self) -> str:
+        """
+        카메라로 실물을 촬영하고, 사진을 AI에게 보내 식물이 무엇인지 한 가지 추측값만 반환받습니다.
+        """
+        from app.services.camera import capture_photo
+        
+        try:
+            # 1. 카메라 촬영 (새로운 파이썬 파일 호출)
+            image_bytes = capture_photo()
+        except Exception as e:
+            raise RuntimeError(f"카메라 촬영 실패: {e}")
+
+        # 2. 이미지 처리
+        img = Image.open(BytesIO(image_bytes)) # 이미지 사용 후 바로 폐기됨
+        img.thumbnail((1024, 1024))
+        
+        prompt = "이 식물이 무엇인지 가장 가능성 높은 식물 종(species) 단 하나만 문자열로 알려줘. 다른 설명, 인사말, 구두점 없이 딱 이름만 말해."
+        
+        try:
+            # Gemini 모델 호출
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=[prompt, img],
+                config={
+                    "temperature": 0.1,
+                }
+            )
+            return response.text.strip()
+        except Exception as e:
+            raise RuntimeError(f"식물 추정 중 오류 발생: {str(e)}")

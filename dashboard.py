@@ -144,9 +144,27 @@ def render_registration_form() -> None:
     새로운 식물을 등록하기 위한 폼을 렌더링합니다.
     """
     st.subheader("식물 등록")
+    
+    if "auto_species" not in st.session_state:
+        st.session_state.auto_species = ""
+        st.session_state.auto_name = ""
+        
+    if st.button("이미지로 식물 추정하기", use_container_width=True):
+        with st.spinner("카메라를 켜고 AI가 사진을 찍어 판별 중입니다..."):
+            try:
+                res = api_request("POST", "/api/plants/identify-species")
+                species = res.get("species", "")
+                st.session_state.auto_species = species
+                st.session_state.auto_name = f"새로운 {species}" if species else ""
+                st.success(f"추정 완료: {species}")
+            except Exception as e:
+                import sys
+                print(f"\n[Error] 이미지 식물 추정 실패: {str(e)}", file=sys.stderr)
+                st.error("식물 종 추정에 실패했습니다. 다시 시도해 주세요.")
+                
     with st.form("register_plant"):
-        name = st.text_input("식물 이름", placeholder="예: 몬스테라")
-        species = st.text_input("식물 종류", placeholder="예: 천남성과")
+        name = st.text_input("식물 이름", value=st.session_state.auto_name, placeholder="예: 몬스테라")
+        species = st.text_input("식물 종류", value=st.session_state.auto_species, placeholder="직접 입력하거나 위 버튼을 사용하세요")
         location = st.text_input("식물 위치", placeholder="예: 실험실 창가")
         submitted = st.form_submit_button("모니터링 시작", use_container_width=True)
         if submitted:
@@ -165,6 +183,8 @@ def render_registration_form() -> None:
                     )
                 st.session_state.selected_plant_id = None
                 st.session_state.show_register = False
+                st.session_state.auto_species = ""
+                st.session_state.auto_name = ""
                 st.rerun()
 
 
@@ -210,8 +230,6 @@ def render_sidebar(runtime) -> dict[str, Any] | None:
     st.sidebar.markdown("---")
     st.sidebar.write("실시간 구성")
     st.sidebar.write(f"- API 주소: `{load_settings().api_base_url}`")
-    st.sidebar.write(f"- AI 제공자: `{load_settings().ai_provider}`")
-    st.sidebar.write(f"- 센서 주기: `{load_settings().sensor_interval_seconds}초`")
     return selected_plant
 
 
@@ -310,7 +328,7 @@ def render_overview_tab(dashboard: dict[str, Any]) -> None:
                 api_request("POST", f"/api/analyses/{latest_analysis['id']}/confirm")
                 st.rerun()
         else:
-            st.info("사진을 업로드하면 GPT 또는 Gemini 분석 결과가 여기에 표시됩니다.")
+            st.info("사진을 업로드하면 AI 분석 결과가 여기에 표시됩니다.")
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
@@ -378,10 +396,6 @@ def render_sensor_form(plant_id: int) -> None:
             st.success("센서값을 저장했습니다.")
             st.rerun()
 
-    if st.button("데모 센서값 자동 생성", use_container_width=True):
-        api_request("POST", f"/api/plants/{plant_id}/demo-sensor")
-        st.success("데모 센서값을 추가했습니다.")
-        st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -488,9 +502,7 @@ def main() -> None:
     try:
         # API 서버 상태 확인
         health = api_request("GET", "/api/health")
-        st.success(
-            f"API 연결됨 | AI 제공자: {health['ai_provider']} | 센서 루프: {'ON' if health['sensor_loop_enabled'] else 'OFF'}"
-        )
+        st.success("API 연결됨 | Google Gemini 사용 중")
     except Exception as error:
         st.error(f"FastAPI 서버 연결 실패: {error}")
         st.info("먼저 `python start_project.py` 또는 FastAPI 서버를 실행해 주세요.")

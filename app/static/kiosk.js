@@ -95,17 +95,11 @@ function formatTime(value) {
   }).format(date);
 }
 
-function statusTitle(status) {
-  if (status === "critical") return "위험 알림";
+function resolveHealthLabel(status) {
+  if (status === "critical") return "위험 상태";
   if (status === "warning") return "주의 알림";
   if (status === "healthy") return "상태 안정";
   return "분석 대기";
-}
-
-function pickDemoSpecies() {
-  const name = $("plant-name-input").value.trim();
-  const seed = Array.from(name || "plant-pulse").reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return demoSpecies[seed % demoSpecies.length];
 }
 
 function showLoading(title, message) {
@@ -132,20 +126,19 @@ async function startKiosk() {
   }
 }
 
-async function identifySpeciesDemo() {
-  const nameInput = $("plant-name-input");
-  if (!nameInput.value.trim()) {
-    nameInput.focus();
-    $("identify-result").textContent = "먼저 식물 이름을 입력해 주세요.";
-    return;
+async function identifySpeciesCamera() {
+  showLoading("AI 판별 중", "카메라로 식물을 촬영하고 분석하고 있습니다.");
+  try {
+    const payload = await apiRequest("/api/plants/identify-species", { method: "POST" });
+    const species = payload.species;
+    $("plant-name-input").value = `새로운 ${species}`;
+    $("plant-species-input").value = species;
+    $("identify-result").textContent = `추정 완료: ${species}`;
+    showView("register");
+  } catch (error) {
+    $("identify-result").textContent = `추정 실패: ${error.message}`;
+    showView("register");
   }
-
-  showLoading("AI 종 판별 중", "카메라 촬영 흐름을 데모 결과로 연결하고 있습니다.");
-  await sleep(900);
-  const result = pickDemoSpecies();
-  $("plant-species-input").value = result.species;
-  $("identify-result").textContent = `데모 판별: ${result.species} · 확신도 ${result.confidence}%`;
-  showView("register");
 }
 
 async function registerPlant(event) {
@@ -276,27 +269,6 @@ async function refreshAndRender() {
   showView("main");
 }
 
-async function syncDemoSensor() {
-  const dashboard = state.payload?.dashboard;
-  const plantId = dashboard?.plant?.id;
-  if (!plantId) {
-    showView("register");
-    return;
-  }
-
-  showLoading("센서 동기화 중", "하드웨어가 없는 환경에서는 데모 센서값을 생성합니다.");
-  try {
-    await apiRequest(`/api/plants/${plantId}/demo-sensor`, { method: "POST" });
-    await sleep(400);
-    await refreshAndRender();
-  } catch (error) {
-    setText("loading-title", "동기화 실패");
-    setText("loading-message", error.message);
-    await sleep(900);
-    showView("main");
-  }
-}
-
 async function confirmAction() {
   const analysisId = state.payload?.kiosk?.latest_analysis_id;
   if (!analysisId) {
@@ -369,9 +341,8 @@ function wireEvents() {
   $("start-button").addEventListener("click", startKiosk);
   $("register-back-button").addEventListener("click", () => showView("start"));
   $("plant-form").addEventListener("submit", registerPlant);
-  $("mock-identify-button").addEventListener("click", identifySpeciesDemo);
+  $("camera-identify-button").addEventListener("click", identifySpeciesCamera);
   $("new-plant-button").addEventListener("click", () => showView("register"));
-  $("sync-button").addEventListener("click", syncDemoSensor);
   $("confirm-action-button").addEventListener("click", confirmAction);
   $("question-button").addEventListener("click", openQuestionModal);
   $("close-question-button").addEventListener("click", closeQuestionModal);

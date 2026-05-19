@@ -12,7 +12,7 @@ from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.bootstrap import build_runtime
@@ -40,23 +40,6 @@ def _as_percent(value: float | None) -> int | None:
     return max(0, min(100, round(float(value) * 100)))
 
 
-def _derive_health_score(status: str | None, confidence: float | None) -> int:
-    """
-    상태와 신뢰도를 바탕으로 시각적인 '건강 점수'를 계산합니다.
-    (실제 로직 변경 없이 주석만 추가)
-    """
-    confidence_percent = _as_percent(confidence)
-    if status == "healthy":
-        return max(88, confidence_percent or 0)
-    if status == "warning":
-        return max(45, min(75, confidence_percent or 62))
-    if status == "critical":
-        if confidence_percent is None:
-            return 34
-        return max(10, min(45, 100 - confidence_percent // 2))
-    return confidence_percent or 72
-
-
 def build_kiosk_payload(dashboard: dict[str, Any] | None, settings: Settings) -> dict[str, Any]:
     """
     키오스크(웹 인터페이스)에 필요한 형식으로 데이터를 가공합니다.
@@ -66,7 +49,6 @@ def build_kiosk_payload(dashboard: dict[str, Any] | None, settings: Settings) ->
             "dashboard": None,
             "kiosk": {
                 "has_plant": False,
-                "demo_mode": settings.ai_provider == "mock",
                 "message": "등록된 식물이 없습니다.",
             },
         }
@@ -74,6 +56,12 @@ def build_kiosk_payload(dashboard: dict[str, Any] | None, settings: Settings) ->
     latest_state = dashboard.get("latest_state") or {}
     latest_analysis = dashboard.get("latest_analysis") or {}
     health_status = latest_analysis.get("health_status") or latest_state.get("latest_health_status")
+    
+    # AI가 직접 분석한 건강 점수 (0점도 유효한 값이므로 명시적 None 체크)
+    health_score = latest_analysis.get("health_score")
+    if health_score is None:
+        health_score = latest_state.get("latest_health_score")
+    
     confidence = latest_analysis.get("confidence")
     if confidence is None:
         confidence = latest_state.get("latest_confidence")
@@ -90,10 +78,9 @@ def build_kiosk_payload(dashboard: dict[str, Any] | None, settings: Settings) ->
         "dashboard": dashboard,
         "kiosk": {
             "has_plant": True,
-            "demo_mode": settings.ai_provider == "mock",
             "health_status": health_status,
             "health_label": STATUS_LABELS.get(health_status, "대기"),
-            "health_score": _derive_health_score(health_status, confidence),
+            "health_score": health_score if health_score is not None else 100,  # 기본값 100
             "confidence_percent": _as_percent(confidence),
             "alert_level": alert_level,
             "alert_message": (
@@ -110,32 +97,6 @@ def build_kiosk_payload(dashboard: dict[str, Any] | None, settings: Settings) ->
     }
 
 
-async def run_periodic_sensor_updates(app: FastAPI) -> None:
-    """
-    주기적으로 센서 데이터를 시뮬레이션하여 업데이트하는 백그라운드 태스크입니다.
-    """
-    settings: Settings = app.state.runtime.settings
-    repository = app.state.runtime.repository
-    monitoring_service = app.state.runtime.monitoring_service
-
-    while True:
-        await asyncio.sleep(settings.sensor_interval_seconds)
-        plant = repository.get_current_plant()
-        if plant is None:
-            continue
-        try:
-            # 설정된 주기에 맞춰 데모 센서값을 생성합니다.
-            monitoring_service.generate_demo_sensor(plant["id"], source="periodic-simulator")
-        except Exception as error:
-            # 실패 시 에러 로그를 기록합니다.
-            repository.add_error(
-                source="periodic-sensor-loop",
-                message="주기 센서 시뮬레이션 저장에 실패했습니다.",
-                metadata={"error": str(error)},
-                plant_id=plant["id"],
-            )
-
-
 def create_app(custom_settings: Settings | None = None) -> FastAPI:
     """
     FastAPI 애플리케이션 인스턴스를 생성하고 라우트를 설정합니다.
@@ -146,19 +107,11 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         """앱의 시작과 종료 시 실행될 로직을 정의합니다."""
         app.state.runtime = runtime
-        sensor_task = None
-        # 센서 루프가 활성화되어 있으면 백그라운드 태스크를 시작합니다.
-        if runtime.settings.enable_sensor_loop:
-            sensor_task = asyncio.create_task(run_periodic_sensor_updates(app))
 
         try:
             yield
         finally:
-            # 앱 종료 시 태스크 취소 및 DB 연결 해제
-            if sensor_task:
-                sensor_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await sensor_task
+            # 앱 종료 시 DB 연결 해제
             runtime.database.close()
 
     app = FastAPI(title=runtime.settings.app_name, lifespan=lifespan)
@@ -166,6 +119,11 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     # --- 화면 관련 ---
+    @app.get("/")
+    async def root() -> RedirectResponse:
+        """루트 경로 접속 시 키오스크 화면으로 리다이렉트합니다."""
+        return RedirectResponse(url="/kiosk")
+
     @app.get("/kiosk")
     async def kiosk() -> FileResponse:
         """키오스크 HTML 페이지를 반환합니다."""
@@ -179,10 +137,24 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         return {
             "status": "ok",
             "app_name": runtime.settings.app_name,
-            "ai_provider": runtime.settings.ai_provider,
             "active_plant_id": current_plant["id"] if current_plant else None,
-            "sensor_loop_enabled": runtime.settings.enable_sensor_loop,
         }
+
+    @app.post("/api/plants/identify-species")
+    async def identify_species() -> dict:
+        """카메라로 실물 사진을 찍어 식물의 종을 추정합니다."""
+        try:
+            species = await runtime.monitoring_service.ai_client.identify_plant_species()
+            return {"species": species}
+        except Exception as error:
+            import sys
+            # 터미널(백그라운드)에 상세 에러(문구만) 출력
+            print(f"\n[Error] 이미지 식물 추정 실패: {str(error)}", file=sys.stderr)
+            # 클라이언트(키오스크)에는 일반적인 메시지만 반환
+            raise HTTPException(
+                status_code=500, 
+                detail="식물 종 추정에 실패했습니다. 다시 시도해 주세요."
+            )
 
     @app.get("/api/plants")
     async def list_plants() -> dict:

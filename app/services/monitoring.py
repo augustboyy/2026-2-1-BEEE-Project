@@ -16,7 +16,6 @@ from app.config import Settings
 from app.repository import PlantRepository
 from app.schemas import SensorLogRequest, WateringLogRequest
 from app.services.ai_client import AIClient
-from app.services.sensor_simulator import SensorSimulator
 
 
 class MonitoringService:
@@ -27,28 +26,16 @@ class MonitoringService:
         settings: Settings,
         repository: PlantRepository,
         ai_client: AIClient,
-        simulator: SensorSimulator,
     ) -> None:
         self.settings = settings
         self.repository = repository
         self.ai_client = ai_client
-        self.simulator = simulator
         # 업로드 폴더가 없으면 생성합니다.
         Path(self.settings.uploads_dir).mkdir(parents=True, exist_ok=True)
 
     def create_plant(self, name: str, species: str | None = None, location: str | None = None) -> dict:
-        """식물을 새로 등록하고 초기 센서 데이터를 생성합니다."""
+        """식물을 새로 등록합니다."""
         plant = self.repository.create_plant(name, species, location)
-        # 초기 센서 상태 시뮬레이션
-        bootstrap_sensor = self.simulator.generate(plant, source="bootstrap-simulator")
-        self.repository.add_sensor_log(
-            plant["id"],
-            bootstrap_sensor["moisture_value"],
-            bootstrap_sensor["humidity"],
-            bootstrap_sensor["temperature"],
-            bootstrap_sensor["light_level"],
-            bootstrap_sensor["source"],
-        )
         return self.repository.build_dashboard(plant["id"])
 
     def activate_plant(self, plant_id: int) -> dict | None:
@@ -86,22 +73,6 @@ class MonitoringService:
             started_at=payload.started_at,
             ended_at=payload.ended_at,
         )
-
-    def generate_demo_sensor(self, plant_id: int, source: str = "manual-simulator") -> dict | None:
-        """테스트를 위한 데모 센서 데이터를 자동 생성하여 저장합니다."""
-        plant = self.repository.get_plant(plant_id)
-        if plant is None:
-            return None
-        snapshot = self.simulator.generate(plant, source=source)
-        self.repository.add_sensor_log(
-            plant_id,
-            snapshot["moisture_value"],
-            snapshot["humidity"],
-            snapshot["temperature"],
-            snapshot["light_level"],
-            snapshot["source"],
-        )
-        return self.repository.build_dashboard(plant_id)
 
     async def analyze_uploaded_photo(
         self,
@@ -141,7 +112,7 @@ class MonitoringService:
             self.repository.add_error(
                 source="ai-analysis",
                 message="외부 AI 사진 분석 요청이 실패했습니다.",
-                metadata={"error": str(error), "provider": self.settings.ai_provider},
+                metadata={"error": str(error)},
                 plant_id=plant_id,
             )
             raise

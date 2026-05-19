@@ -50,13 +50,8 @@ class Settings:
     dashboard_port: int
     database_path: str
     uploads_dir: str
-    sensor_interval_seconds: int
-    enable_sensor_loop: bool
-    ai_provider: str
     ai_timeout_seconds: float
     max_upload_mb: int
-    openai_api_key: str | None
-    openai_model: str
     gemini_api_key: str | None
     gemini_model: str
 
@@ -67,7 +62,7 @@ def load_settings() -> Settings:
     """
     # .env 파일이 있으면 로드합니다.
     load_dotenv(PROJECT_ROOT / ".env")
-    
+
     app_host = os.getenv("APP_HOST", "127.0.0.1")
     app_port = int(os.getenv("APP_PORT", "8000"))
     api_base_url = os.getenv("API_BASE_URL", f"http://127.0.0.1:{app_port}")
@@ -83,13 +78,8 @@ def load_settings() -> Settings:
         dashboard_port=dashboard_port,
         database_path=_resolve_path(os.getenv("DATABASE_PATH", "data/plant_monitor.db")),
         uploads_dir=_resolve_path(os.getenv("UPLOADS_DIR", "data/uploads")),
-        sensor_interval_seconds=int(os.getenv("SENSOR_INTERVAL_SECONDS", "15")),
-        enable_sensor_loop=_get_bool("ENABLE_SENSOR_LOOP", True),
-        ai_provider=os.getenv("AI_PROVIDER", "mock").strip().lower(),
-        ai_timeout_seconds=float(os.getenv("AI_TIMEOUT_SECONDS", "20")),
+        ai_timeout_seconds=float(os.getenv("AI_TIMEOUT_SECONDS", "30")),
         max_upload_mb=int(os.getenv("MAX_UPLOAD_MB", "10")),
-        openai_api_key=os.getenv("OPENAI_API_KEY"),
-        openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview"),
     )

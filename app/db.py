@@ -14,7 +14,7 @@ from typing import Iterator
 
 
 # 데이터베이스 스키마 버전 관리를 위한 변수입니다.
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 
 # 기본이 되는 테이블 구조를 정의합니다. (식물, 사진, 센서 로그, 급수 로그, AI 분석 결과 등)
@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS analysis_results (
     response_json TEXT NOT NULL,
     raw_response_text TEXT,
     health_status TEXT NOT NULL,
+    health_score INTEGER NOT NULL DEFAULT 0,
     condition_summary TEXT NOT NULL,
     advice TEXT NOT NULL,
     observed_issues_json TEXT NOT NULL,
@@ -107,6 +108,7 @@ CREATE TABLE IF NOT EXISTS latest_state (
     latest_watering_log_id INTEGER,
     latest_image_id INTEGER,
     latest_health_status TEXT,
+    latest_health_score INTEGER DEFAULT 0,
     latest_condition_summary TEXT,
     latest_advice TEXT,
     latest_watering_need TEXT,
@@ -375,11 +377,18 @@ class Database:
             migrations = (
                 (1, BASE_SCHEMA_SQL),
                 (2, EXTENDED_SCHEMA_SQL + INDEX_SQL),
+                (3, "ALTER TABLE analysis_results ADD COLUMN health_score INTEGER NOT NULL DEFAULT 0; ALTER TABLE latest_state ADD COLUMN latest_health_score INTEGER DEFAULT 0;"),
             )
             for target_version, migration_sql in migrations:
                 if version < target_version:
                     # 지정된 버전까지 순차적으로 마이그레이션 실행
-                    self._connection.executescript(migration_sql)
+                    if target_version == 3:
+                        # ALTER TABLE은 여러 명령어를 한 번에 실행하기 어려울 수 있으므로 나눠서 실행
+                        for cmd in migration_sql.split(';'):
+                            if cmd.strip():
+                                self._connection.execute(cmd.strip())
+                    else:
+                        self._connection.executescript(migration_sql)
                     self._connection.execute(f"PRAGMA user_version = {target_version};")
                     version = target_version
             self._connection.commit()

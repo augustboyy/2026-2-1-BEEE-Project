@@ -496,10 +496,10 @@ class PlantRepository:
                 INSERT INTO analysis_results
                 (
                     plant_id, job_id, image_id, provider, model_name, request_note, prompt_text,
-                    response_json, raw_response_text, health_status, condition_summary, advice,
+                    response_json, raw_response_text, health_status, health_score, condition_summary, advice,
                     observed_issues_json, watering_need, confidence, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     plant_id,
@@ -512,6 +512,7 @@ class PlantRepository:
                     _json_dumps(response_json, {}),
                     raw_response_text,
                     response_json["health_status"],
+                    response_json.get("health_score", 0),
                     response_json["condition_summary"],
                     response_json["advice"],
                     _json_dumps(response_json.get("observed_issues"), []),
@@ -527,6 +528,7 @@ class PlantRepository:
                 latest_analysis_id=analysis_id,
                 latest_image_id=image_id,
                 latest_health_status=response_json["health_status"],
+                latest_health_score=response_json.get("health_score", 0),
                 latest_condition_summary=response_json["condition_summary"],
                 latest_advice=response_json["advice"],
                 latest_watering_need=response_json["watering_need"],

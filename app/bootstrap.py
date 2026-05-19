@@ -12,7 +12,6 @@ from app.db import Database
 from app.repository import PlantRepository
 from app.services.ai_client import AIClient
 from app.services.monitoring import MonitoringService
-from app.services.sensor_simulator import SensorSimulator
 
 
 @dataclass(slots=True)
@@ -46,12 +45,11 @@ def build_runtime(custom_settings: Settings | None = None) -> Runtime:
     # 3. 데이터 저장소(Repository) 생성
     repository = PlantRepository(database)
     
-    # 4. 모니터링 서비스 생성 (AI 클라이언트, 센서 시뮬레이터 등을 주입)
+    # 4. 모니터링 서비스 생성 (AI 클라이언트 주입)
     monitoring_service = MonitoringService(
         settings=settings,
         repository=repository,
         ai_client=AIClient(settings),
-        simulator=SensorSimulator(),
     )
     
     # 5. 모든 객체를 담은 Runtime 반환
