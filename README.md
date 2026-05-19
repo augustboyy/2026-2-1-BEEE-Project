@@ -65,3 +65,25 @@ pip freeze > requirements.txt
 
 ## 📁 프로젝트 구조
 - `cloud-A.I.py`: AI 관련 메인 로직 (작업 예정)
+
+## 아두이노 센서 데이터 보내는 방법
+- 필요한 실제 데이터:
+1. 센서 데이터: 아두이노(Arduino), 라즈베리 파이(Raspberry Pi), 또는 ESP32와 같은 마이크로컨트롤러가 주기적으로 토양 수분, 온/습도, 조도 데이터를 측정해야 합니다.
+2. 급수 데이터: 자동 급수 펌프가 작동할 때마다 작동 시간과 급수량을 전송해야 합니다.
+
+  데이터 수신 방법 (REST API 활용):
+  물리적 기기는 인터넷에 연결된 후, 다음 엔드포인트로 JSON 데이터를 POST 전송해야 합니다.
+
+  ```bash
+   * 센서 로그 수신 API (/api/external/sensor-data)
+
+    POST http://(서버IP):8000/api/external/sensor-data
+        {
+        "plant_id": 1,
+        "moisture_value": 42.5,
+	    "humidity": 55.0,
+        "temperature": 24.3,
+        "light_level": 6500,
+        "source": "arduino-sensor-node-1"
+		}
+   ```
