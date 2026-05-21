@@ -227,24 +227,88 @@ class PlantRepository:
         original_name: str,
         mime_type: str,
     ) -> dict[str, Any]:
-        """업로드된 식물 사진 메타데이터를 DB에 저장합니다."""
+        """업로드된 식물 사진 메타데이터를 DB에 저장하고 3장 유지 규칙을 적용합니다."""
         created_at = utc_now_iso()
-        cursor = self.database.execute(
-            """
-            INSERT INTO uploaded_images (plant_id, file_path, original_name, mime_type, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (plant_id, file_path, original_name, mime_type, created_at),
-        )
-        image_id = cursor.lastrowid
-        self.update_latest_state(plant_id, latest_image_id=image_id)
+        
+        with self.database.transaction():
+            # 1. 새 사진 저장
+            cursor = self.database.execute(
+                """
+                INSERT INTO uploaded_images (plant_id, file_path, original_name, mime_type, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (plant_id, file_path, original_name, mime_type, created_at),
+            )
+            new_image_id = cursor.lastrowid
+            
+            # 2. 기존 상태 확인 및 아침 사진 판별
+            state = self.get_latest_state(plant_id)
+            current_latest_id = state.get("latest_image_id") if state else None
+            current_morning_id = state.get("morning_image_id") if state else None
+            
+            # 오늘 아침 9시인지 확인하여 morning_image_id 갱신
+            now = datetime.now()
+            new_morning_id = current_morning_id
+            
+            # 저장된 아침 사진이 오늘 것이 아니면 None으로 간주
+            if current_morning_id:
+                m_img = self.get_uploaded_image(current_morning_id)
+                if m_img:
+                    m_date = datetime.fromisoformat(m_img["created_at"].replace("Z", "+00:00")).date()
+                    if m_date != now.date():
+                        new_morning_id = None
+            
+            # 9:00~9:09 사이에 처음 찍힌 사진을 오늘 아침 사진으로 등록
+            if now.hour == 9 and 0 <= now.minute <= 9 and not new_morning_id:
+                new_morning_id = new_image_id
+            
+            # 3. 상태 업데이트 (Latest -> Previous 시프트)
+            self.update_latest_state(
+                plant_id,
+                latest_image_id=new_image_id,
+                previous_image_id=current_latest_id,
+                morning_image_id=new_morning_id
+            )
+            
+            # 4. 불필요한 사진(3장에 해당하지 않는 사진) 정리
+            self._purge_obsolete_images(plant_id, {new_image_id, current_latest_id, new_morning_id})
+
         self.add_activity(
             plant_id,
             "image_uploaded",
             "식물 사진이 업로드되었습니다.",
-            {"image_id": image_id, "original_name": original_name},
+            {"image_id": new_image_id, "original_name": original_name},
         )
-        return self.get_uploaded_image(image_id)
+        return self.get_uploaded_image(new_image_id)
+
+    def _purge_obsolete_images(self, plant_id: int, kept_ids: set[int | None]) -> None:
+        """유지해야 할 3장의 사진 외에 모든 과거 사진을 파일과 DB에서 삭제합니다."""
+        from pathlib import Path
+        import os
+        
+        valid_ids = {i for i in kept_ids if i is not None}
+        if not valid_ids:
+            return
+
+        # 삭제 대상 조회
+        placeholders = ", ".join(["?"] * len(valid_ids))
+        query = f"SELECT id, file_path FROM uploaded_images WHERE plant_id = ? AND id NOT IN ({placeholders})"
+        obs_rows = self.database.fetchall(query, (plant_id, *valid_ids))
+        
+        for row in obs_rows:
+            img_id = row["id"]
+            f_path = row["file_path"]
+            
+            # 디스크에서 삭제
+            if f_path and os.path.exists(f_path):
+                try:
+                    os.remove(f_path)
+                except Exception:
+                    pass
+            
+            # DB에서 삭제 (연관 데이터 포함)
+            self.database.execute("DELETE FROM camera_captures WHERE image_id = ?", (img_id,))
+            self.database.execute("DELETE FROM uploaded_images WHERE id = ?", (img_id,))
 
     def get_uploaded_image(self, image_id: int) -> dict[str, Any] | None:
         row = self.database.fetchone("SELECT * FROM uploaded_images WHERE id = ?", (image_id,))

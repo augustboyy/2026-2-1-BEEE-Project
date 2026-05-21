@@ -91,6 +91,9 @@ def build_kiosk_payload(dashboard: dict[str, Any] | None, settings: Settings) ->
                 else None
             ),
             "latest_analysis_id": latest_analysis.get("id"),
+            "latest_image_id": latest_state.get("latest_image_id"),
+            "morning_image_id": latest_state.get("morning_image_id"),
+            "previous_image_id": latest_state.get("previous_image_id"),
             "can_confirm_action": can_confirm_action,
             "sensor_synced": bool(dashboard.get("latest_sensor_state")),
         },

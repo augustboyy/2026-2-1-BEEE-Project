@@ -14,8 +14,7 @@ from typing import Iterator
 
 
 # 데이터베이스 스키마 버전 관리를 위한 변수입니다.
-CURRENT_SCHEMA_VERSION = 3
-
+CURRENT_SCHEMA_VERSION = 4
 
 # 기본이 되는 테이블 구조를 정의합니다. (식물, 사진, 센서 로그, 급수 로그, AI 분석 결과 등)
 BASE_SCHEMA_SQL = """
@@ -107,6 +106,8 @@ CREATE TABLE IF NOT EXISTS latest_state (
     latest_sensor_log_id INTEGER,
     latest_watering_log_id INTEGER,
     latest_image_id INTEGER,
+    morning_image_id INTEGER,
+    previous_image_id INTEGER,
     latest_health_status TEXT,
     latest_health_score INTEGER DEFAULT 0,
     latest_condition_summary TEXT,
@@ -120,7 +121,9 @@ CREATE TABLE IF NOT EXISTS latest_state (
     FOREIGN KEY (latest_analysis_id) REFERENCES analysis_results (id),
     FOREIGN KEY (latest_sensor_log_id) REFERENCES sensor_logs (id),
     FOREIGN KEY (latest_watering_log_id) REFERENCES watering_logs (id),
-    FOREIGN KEY (latest_image_id) REFERENCES uploaded_images (id)
+    FOREIGN KEY (latest_image_id) REFERENCES uploaded_images (id),
+    FOREIGN KEY (morning_image_id) REFERENCES uploaded_images (id),
+    FOREIGN KEY (previous_image_id) REFERENCES uploaded_images (id)
 );
 
 CREATE TABLE IF NOT EXISTS activity_logs (
@@ -378,11 +381,12 @@ class Database:
                 (1, BASE_SCHEMA_SQL),
                 (2, EXTENDED_SCHEMA_SQL + INDEX_SQL),
                 (3, "ALTER TABLE analysis_results ADD COLUMN health_score INTEGER NOT NULL DEFAULT 0; ALTER TABLE latest_state ADD COLUMN latest_health_score INTEGER DEFAULT 0;"),
+                (4, "ALTER TABLE latest_state ADD COLUMN morning_image_id INTEGER; ALTER TABLE latest_state ADD COLUMN previous_image_id INTEGER;"),
             )
             for target_version, migration_sql in migrations:
                 if version < target_version:
                     # 지정된 버전까지 순차적으로 마이그레이션 실행
-                    if target_version == 3:
+                    if target_version in [3, 4]:
                         # ALTER TABLE은 여러 명령어를 한 번에 실행하기 어려울 수 있으므로 나눠서 실행
                         for cmd in migration_sql.split(';'):
                             if cmd.strip():

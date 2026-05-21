@@ -55,16 +55,25 @@ def main() -> None:
         env=env,
     )
 
+    # 3. 로컬 AI 카메라 서비스 실행 (10분 간격 촬영)
+    local_ai_process = subprocess.Popen(
+        [python_executable, "src/local_AI.py"],
+        env=env,
+    )
+
     # 실행 중인 서버들의 주소를 출력합니다.
     print(f"API: {settings.api_base_url}/api/health")
     print(f"Dashboard: http://{settings.dashboard_host}:{settings.dashboard_port}")
+    print("Local AI: Background camera service started (10-min interval)")
     print("중지하려면 Ctrl+C 를 누르세요.")
 
     try:
         # 프로세스들이 실행 중인 동안 무한 루프를 돌며 상태를 체크합니다.
         while True:
             # 어느 한 프로세스라도 종료되면 루프를 빠져나갑니다.
-            if api_process.poll() is not None or dashboard_process.poll() is not None:
+            if (api_process.poll() is not None or 
+                dashboard_process.poll() is not None or 
+                local_ai_process.poll() is not None):
                 break
             time.sleep(1)
     except KeyboardInterrupt:
@@ -72,7 +81,7 @@ def main() -> None:
         pass
     finally:
         # 프로그램 종료 시 실행 중인 서브프로세스들을 안전하게 종료합니다.
-        for process in (dashboard_process, api_process):
+        for process in (local_ai_process, dashboard_process, api_process):
             if process.poll() is None:
                 process.terminate()
 
