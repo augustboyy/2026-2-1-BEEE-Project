@@ -20,10 +20,6 @@ from app.config import Settings
 ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
-        "health_status": {
-            "type": "string",
-            "enum": ["healthy", "warning", "critical"],
-        },
         "health_score": {
             "type": "integer",
             "minimum": 0,
@@ -37,18 +33,14 @@ ANALYSIS_SCHEMA = {
         },
         "watering_need": {
             "type": "string",
-            "enum": ["low", "medium", "high"],
         },
-        "confidence": {"type": "number"},
     },
     "required": [
-        "health_status",
         "health_score",
         "condition_summary",
         "advice",
         "observed_issues",
         "watering_need",
-        "confidence",
     ],
     "additionalProperties": False,
 }
@@ -127,13 +119,11 @@ class AIClient:
             "제공된 사진과 환경 데이터를 바탕으로 전문가의 시각에서 식물을 철저히 분석하세요.\n\n"
             "반드시 아래의 JSON 형식을 지켜 답변하세요:\n"
             "{\n"
-            '  "health_status": "healthy" | "warning" | "critical",\n'
             '  "health_score": 0~100 사이의 정수 (100점 만점 기준의 건강도 점수),\n'
             '  "condition_summary": "현재 식물 상태에 대한 전문가적 요약",\n'
             '  "advice": "구체적이고 실천 가능한 조치 방안",\n'
             '  "observed_issues": ["감지된 문제점 리스트"],\n'
-            '  "watering_need": "low" | "medium" | "high",\n'
-            '  "confidence": 0~1 사이의 신뢰도\n'
+            '  "watering_need": "급수가 필요하다고 판단되면 \'급수를 하는걸 추천합니다\'라고 작성, 아니면 빈 문자열(\'\')로 작성"\n'
             "}\n\n"
             f"식물 이름: {plant['name']}\n"
             f"식물 종류: {plant.get('species') or '미입력'}\n"
@@ -161,27 +151,27 @@ class AIClient:
         if isinstance(observed_issues, str):
             observed_issues = [observed_issues]
 
+        health_score = int(parsed.get("health_score", 0))
+        health_score = max(0, min(100, health_score))
+        
+        # 점수에 따른 상태값 도출
+        if health_score <= 30:
+            health_status = "critical"
+        elif health_score <= 60:
+            health_status = "warning"
+        else:
+            health_status = "healthy"
+
         result = {
-            "health_status": str(parsed.get("health_status", "warning")).lower(),
-            "health_score": int(parsed.get("health_score", 0)),
+            "health_status": health_status,
+            "health_score": health_score,
             "condition_summary": str(parsed.get("condition_summary", "")).strip(),
             "advice": str(parsed.get("advice", "")).strip(),
             "observed_issues": [str(item).strip() for item in observed_issues if str(item).strip()],
-            "watering_need": str(parsed.get("watering_need", "medium")).lower(),
-            "confidence": float(parsed.get("confidence", 0.0)),
+            "watering_need": str(parsed.get("watering_need", "")).strip(),
+            "confidence": 1.0, # DB 스키마 호환성을 위해 1.0 고정 (UI에선 숨김)
         }
 
-        # 유효하지 않은 값들에 대한 기본값 처리
-        if result["health_status"] not in {"healthy", "warning", "critical"}:
-            result["health_status"] = "warning"
-        
-        # 점수 범위 제한
-        result["health_score"] = max(0, min(100, result["health_score"]))
-        
-        if result["watering_need"] not in {"low", "medium", "high"}:
-            result["watering_need"] = "medium"
-        result["confidence"] = max(0.0, min(1.0, result["confidence"]))
-        
         if not result["condition_summary"]:
             result["condition_summary"] = "AI가 사진을 분석했지만 요약 문장을 충분히 반환하지 않았습니다."
         if not result["advice"]:

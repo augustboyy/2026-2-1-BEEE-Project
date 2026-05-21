@@ -21,7 +21,6 @@ class SensorLogRequest(BaseModel):
     moisture_value: float = Field(..., ge=0, le=100)  # 토양 수분 (0~100%)
     humidity: float | None = Field(default=None, ge=0, le=100)  # 습도 (0~100%)
     temperature: float | None = Field(default=None, ge=-20, le=60)  # 온도 (-20~60°C)
-    light_level: float | None = Field(default=None, ge=0, le=30000)  # 광량 (0~30000 lux)
     source: str = Field(default="external-device", max_length=60)  # 데이터 출처
 
 

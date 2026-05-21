@@ -55,7 +55,7 @@ class MonitoringService:
             payload.moisture_value,
             payload.humidity,
             payload.temperature,
-            payload.light_level,
+            None, # light_level is removed
             payload.source,
         )
 
@@ -81,6 +81,7 @@ class MonitoringService:
         file_bytes: bytes,
         content_type: str | None,
         note: str | None = None,
+        save_image: bool = True,
     ) -> dict:
         """
         사용자가 업로드한 사진을 외부 AI에게 보내 분석하고 결과를 저장하는 핵심 비즈니스 로직입니다.
@@ -92,7 +93,10 @@ class MonitoringService:
         # 1. 이미지 검증 및 저장
         mime_type = content_type or self._detect_mime_type(file_bytes)
         self._validate_upload(file_name, file_bytes, mime_type)
-        image_path = self._store_image(file_name, file_bytes)
+        
+        image_path = None
+        if save_image:
+            image_path = self._store_image(file_name, file_bytes)
 
         # 2. AI 분석을 위해 최신 센서/급수 데이터 가져오기
         latest_sensor = self.repository.get_latest_sensor_state(plant_id)
@@ -115,31 +119,42 @@ class MonitoringService:
                 metadata={"error": str(error)},
                 plant_id=plant_id,
             )
+            if image_path:
+                try:
+                    Path(image_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
             raise
 
         # 4. 분석 결과 및 사진 정보를 DB에 원자적으로(Transaction) 저장
         with self.repository.database.transaction():
-            uploaded_image = self.repository.save_uploaded_image(plant_id, image_path, file_name, mime_type)
-            camera_capture = self.repository.save_camera_capture(
-                plant_id=plant_id,
-                purpose="manual_upload",
-                image_path=image_path,
-                image_id=uploaded_image["id"],
-                original_name=file_name,
-                mime_type=mime_type,
-                metadata={"note": note},
-            )
+            image_id = None
+            camera_capture_id = None
+            if save_image and image_path:
+                uploaded_image = self.repository.save_uploaded_image(plant_id, image_path, file_name, mime_type)
+                image_id = uploaded_image["id"]
+                camera_capture = self.repository.save_camera_capture(
+                    plant_id=plant_id,
+                    purpose="manual_upload",
+                    image_path=image_path,
+                    image_id=image_id,
+                    original_name=file_name,
+                    mime_type=mime_type,
+                    metadata={"note": note},
+                )
+                camera_capture_id = camera_capture["id"]
+
             analysis = self.repository.add_analysis_result(
                 plant_id=plant_id,
                 job_id=str(uuid.uuid4()),
-                image_id=uploaded_image["id"],
+                image_id=image_id,
                 provider=ai_payload["provider"],
                 model_name=ai_payload["model_name"],
                 request_note=note,
                 prompt_text=ai_payload["prompt_text"],
                 response_json=ai_payload["result"],
                 raw_response_text=ai_payload["raw_response_text"],
-                camera_capture_id=camera_capture["id"],
+                camera_capture_id=camera_capture_id,
             )
         return {
             "analysis": analysis,

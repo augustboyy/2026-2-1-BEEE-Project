@@ -82,7 +82,7 @@
               <span>점</span>
             </div>
             <div class="score-track" aria-hidden="true"><span id="score-fill"></span></div>
-            <p id="confidence-line" class="muted-line">신뢰도 대기 중</p>
+            <p id="confidence-line" class="muted-line">건강점수 대기 중</p>
           </div>
 
           <div class="sensor-grid" aria-label="최신 센서값">
@@ -99,8 +99,8 @@
               <strong id="sensor-humidity">--</strong>
             </div>
             <div class="sensor-cell">
-              <span>광량</span>
-              <strong id="sensor-light">--</strong>
+              <span>최근 급수</span>
+              <strong id="sensor-watering">--</strong>
             </div>
           </div>
         </section>
@@ -109,19 +109,14 @@
           <article class="detail-panel diagnosis-panel">
             <div class="section-heading">
               <h2>AI 진단 요약</h2>
-              <span id="analysis-time">분석 대기</span>
+              <div>
+                <span id="analysis-time" style="margin-right:10px;">분석 대기</span>
+                <button id="question-button" class="touch-button secondary-button compact-button" type="button">질문하기</button>
+              </div>
             </div>
             <p id="diagnosis-summary" class="large-copy">아직 사진 분석 결과가 없습니다.</p>
             <h3>AI 추천 조치</h3>
             <p id="advice-text">사진 분석이 완료되면 추천 조치가 표시됩니다.</p>
-          </article>
-
-          <article class="detail-panel watering-panel">
-            <div class="section-heading">
-              <h2>최근 급수 이력</h2>
-              <button id="question-button" class="touch-button secondary-button compact-button" type="button">질문하기</button>
-            </div>
-            <ol id="watering-list" class="timeline-list"></ol>
           </article>
         </section>
       </section>
@@ -141,6 +136,6 @@
       </div>
     </div>
 
-    <script src="/static/kiosk.js" defer></script>
+    <script src="/static/kiosk.js?v=2" defer></script>
   </body>
 </html>

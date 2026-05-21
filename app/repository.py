@@ -148,8 +148,6 @@ class PlantRepository:
         recommended_temperature_max: float | None = None,
         recommended_humidity_min: float | None = None,
         recommended_humidity_max: float | None = None,
-        recommended_light_min: float | None = None,
-        recommended_light_max: float | None = None,
         watering_interval_days: int | None = None,
         care_notes: dict[str, Any] | list[Any] | None = None,
     ) -> dict[str, Any]:
@@ -166,10 +164,9 @@ class PlantRepository:
                 recommended_moisture_min, recommended_moisture_max,
                 recommended_temperature_min, recommended_temperature_max,
                 recommended_humidity_min, recommended_humidity_max,
-                recommended_light_min, recommended_light_max,
                 watering_interval_days, care_notes_json, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(species_name) DO UPDATE SET
                 common_name = COALESCE(excluded.common_name, species_profiles.common_name),
                 description = COALESCE(excluded.description, species_profiles.description),
@@ -179,8 +176,6 @@ class PlantRepository:
                 recommended_temperature_max = COALESCE(excluded.recommended_temperature_max, species_profiles.recommended_temperature_max),
                 recommended_humidity_min = COALESCE(excluded.recommended_humidity_min, species_profiles.recommended_humidity_min),
                 recommended_humidity_max = COALESCE(excluded.recommended_humidity_max, species_profiles.recommended_humidity_max),
-                recommended_light_min = COALESCE(excluded.recommended_light_min, species_profiles.recommended_light_min),
-                recommended_light_max = COALESCE(excluded.recommended_light_max, species_profiles.recommended_light_max),
                 watering_interval_days = COALESCE(excluded.watering_interval_days, species_profiles.watering_interval_days),
                 care_notes_json = CASE
                     WHEN excluded.care_notes_json = '{}' THEN species_profiles.care_notes_json
@@ -198,8 +193,6 @@ class PlantRepository:
                 recommended_temperature_max,
                 recommended_humidity_min,
                 recommended_humidity_max,
-                recommended_light_min,
-                recommended_light_max,
                 watering_interval_days,
                 _json_dumps(care_notes, {}),
                 now,

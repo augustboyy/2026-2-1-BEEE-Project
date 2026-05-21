@@ -81,7 +81,6 @@ def build_kiosk_payload(dashboard: dict[str, Any] | None, settings: Settings) ->
             "health_status": health_status,
             "health_label": STATUS_LABELS.get(health_status, "대기"),
             "health_score": health_score if health_score is not None else 100,  # 기본값 100
-            "confidence_percent": _as_percent(confidence),
             "alert_level": alert_level,
             "alert_message": (
                 "AI 진단에서 즉시 확인이 필요한 상태가 감지되었습니다."
@@ -179,8 +178,37 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/plants")
     async def create_plant(payload: PlantCreateRequest) -> dict:
-        """새로운 식물을 등록합니다."""
-        return {"dashboard": runtime.monitoring_service.create_plant(payload.name, payload.species, payload.location)}
+        """새로운 식물을 등록하고 초기 분석을 위해 사진을 자동 촬영합니다."""
+        from app.services.camera import capture_photo
+        import datetime
+        
+        plant_dict = runtime.monitoring_service.create_plant(payload.name, payload.species, payload.location)
+        plant_id = plant_dict["plant"]["id"]
+        
+        try:
+            # 1. 초기 상태 설정을 위한 카메라 촬영
+            image_bytes = capture_photo()
+            now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            file_name = f"initial_capture_{now_str}.jpg"
+            
+            # 2. AI 분석 요청 (이 과정에서 사진이 저장되고 AI 평가 결과가 DB에 기록됨)
+            await runtime.monitoring_service.analyze_uploaded_photo(
+                plant_id=plant_id,
+                file_name=file_name,
+                file_bytes=image_bytes,
+                content_type="image/jpeg",
+                note="[초기 등록] 식물이 시스템에 새로 등록되어 자동 촬영되었습니다.",
+                save_image=False
+            )
+            # 분석이 완료된 후의 최신 대시보드 데이터로 갱신
+            dashboard = runtime.repository.build_dashboard(plant_id)
+        except Exception as e:
+            import traceback
+            import sys
+            print(f"\\n[Error] 식물 초기 등록 자동 촬영/분석 실패: {e}\\n{traceback.format_exc()}", file=sys.stderr)
+            dashboard = runtime.repository.build_dashboard(plant_id)
+            
+        return {"dashboard": dashboard}
 
     @app.post("/api/plants/activate")
     async def activate_plant(payload: PlantActivationRequest) -> dict:
