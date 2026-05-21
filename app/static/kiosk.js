@@ -189,12 +189,6 @@ function renderMain(payload) {
   setText("plant-subtitle", `${species} · 최근 센서 ${formatTime(sensor.received_at || sensor.updated_at)}`);
   setText("health-label", kiosk.health_label || resolveHealthLabel(kiosk.health_status));
   setText("health-score", kiosk.health_score ?? "--");
-  setText(
-    "confidence-line",
-    kiosk.confidence_percent === null || kiosk.confidence_percent === undefined
-      ? "신뢰도 대기 중"
-      : `AI 신뢰도 ${kiosk.confidence_percent}%`
-  );
 
   const statusBadge = $("health-label");
   statusBadge.className = "status-badge";
@@ -225,7 +219,22 @@ function renderMain(payload) {
     "diagnosis-summary",
     analysis.condition_summary || latestState.latest_condition_summary || "아직 사진 분석 결과가 없습니다."
   );
-  setText("advice-text", analysis.advice || latestState.latest_advice || "사진 분석이 완료되면 추천 조치가 표시됩니다.");
+  
+  let issuesText = "";
+  const issues = analysis.observed_issues;
+  if (Array.isArray(issues) && issues.length > 0) {
+    issuesText = "⚠️ " + issues.join(", ") + "\n\n";
+  }
+
+  let adviceText = analysis.advice || latestState.latest_advice || "사진 분석이 완료되면 추천 조치가 표시됩니다.";
+  const wateringNeed = analysis.watering_need || latestState.latest_watering_need;
+  if (wateringNeed) {
+    adviceText += `\n\n💧 ${wateringNeed}`;
+  }
+  
+  setText("advice-text", issuesText + adviceText);
+  // 줄바꿈이 정상적으로 렌더링 되도록 css 적용
+  $("advice-text").style.whiteSpace = "pre-wrap";
 
   renderAlert(kiosk, analysis);
 }

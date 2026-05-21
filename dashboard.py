@@ -417,7 +417,7 @@ def render_history_tab(dashboard: dict[str, Any]) -> None:
     if not analysis_df.empty:
         st.markdown("**AI 분석 기록**")
         st.dataframe(
-            analysis_df[["created_at", "provider", "model_name", "health_status", "watering_need", "confidence", "confirmed_at"]],
+            analysis_df[["created_at", "provider", "model_name", "health_status", "watering_need", "confirmed_at"]],
             use_container_width=True,
         )
 
