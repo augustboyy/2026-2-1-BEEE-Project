@@ -55,7 +55,7 @@ class MonitoringService:
             payload.moisture_value,
             payload.humidity,
             payload.temperature,
-            payload.light_level,
+            None, # light_level is removed
             payload.source,
         )
 

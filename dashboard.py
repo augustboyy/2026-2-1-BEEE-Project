@@ -272,7 +272,7 @@ def render_metrics(dashboard: dict[str, Any]) -> None:
         unsafe_allow_html=True,
     )
     col2.markdown(
-        f"<div class='metric-box'><div class='eyebrow'>온도 / 습도</div><h3>{sensor.get('temperature', '-')}°C / {sensor.get('humidity', '-')}%</h3><div class='subtle'>광량 {sensor.get('light_level', '-')} lux</div></div>",
+        f"<div class='metric-box'><div class='eyebrow'>온도 / 습도</div><h3>{sensor.get('temperature', '-')}°C / {sensor.get('humidity', '-')}%</h3><div class='subtle'>수집됨</div></div>",
         unsafe_allow_html=True,
     )
     col3.markdown(
@@ -332,13 +332,11 @@ def render_overview_tab(dashboard: dict[str, Any]) -> None:
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
-    action_col1, action_col2, action_col3 = st.columns(3)
+    action_col1, action_col2 = st.columns(2)
     with action_col1:
         render_photo_upload_form(dashboard["plant"]["id"])
     with action_col2:
         render_sensor_form(dashboard["plant"]["id"])
-    with action_col3:
-        render_watering_form(dashboard["plant"]["id"])
 
 
 def render_photo_upload_form(plant_id: int) -> None:
@@ -379,7 +377,6 @@ def render_sensor_form(plant_id: int) -> None:
         moisture = st.number_input("토양 수분(%)", min_value=0.0, max_value=100.0, value=45.0, step=0.1)
         humidity = st.number_input("습도(%)", min_value=0.0, max_value=100.0, value=55.0, step=0.1)
         temperature = st.number_input("온도(°C)", min_value=-20.0, max_value=60.0, value=23.0, step=0.1)
-        light_level = st.number_input("광량(lux)", min_value=0.0, max_value=30000.0, value=6500.0, step=10.0)
         submitted = st.form_submit_button("센서값 저장", use_container_width=True)
         if submitted:
             api_request(
@@ -389,41 +386,12 @@ def render_sensor_form(plant_id: int) -> None:
                     "moisture_value": moisture,
                     "humidity": humidity,
                     "temperature": temperature,
-                    "light_level": light_level,
                     "source": "streamlit-manual",
                 },
             )
             st.success("센서값을 저장했습니다.")
             st.rerun()
 
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-def render_watering_form(plant_id: int) -> None:
-    """
-    급수 기록을 수동으로 입력하기 위한 폼을 렌더링합니다.
-    """
-    st.markdown("<div class='section-box'>", unsafe_allow_html=True)
-    st.subheader("급수 기록")
-    with st.form("watering_form"):
-        mode = st.selectbox("급수 방식", ["manual", "auto"], format_func=lambda x: "수동" if x == "manual" else "자동")
-        amount_ml = st.number_input("급수량(ml)", min_value=0.0, max_value=10000.0, value=200.0, step=10.0)
-        duration_seconds = st.number_input("지속 시간(초)", min_value=0, max_value=86400, value=20, step=1)
-        note = st.text_input("메모", placeholder="예: 오전 실험 후 수동 급수")
-        submitted = st.form_submit_button("급수 기록 저장", use_container_width=True)
-        if submitted:
-            api_request(
-                "POST",
-                f"/api/plants/{plant_id}/watering-logs",
-                json={
-                    "mode": mode,
-                    "amount_ml": amount_ml,
-                    "duration_seconds": duration_seconds,
-                    "note": note or None,
-                },
-            )
-            st.success("급수 기록을 저장했습니다.")
-            st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -439,7 +407,7 @@ def render_history_tab(dashboard: dict[str, Any]) -> None:
         sensor_df = sensor_df.set_index("received_at")
         st.line_chart(sensor_df[["moisture_value", "humidity", "temperature"]], use_container_width=True)
         st.dataframe(
-            sensor_df.reset_index()[["received_at", "moisture_value", "humidity", "temperature", "light_level", "source"]],
+            sensor_df.reset_index()[["received_at", "moisture_value", "humidity", "temperature", "source"]],
             use_container_width=True,
         )
     else:

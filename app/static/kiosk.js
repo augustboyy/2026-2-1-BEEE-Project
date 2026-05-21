@@ -187,7 +187,7 @@ function renderMain(payload) {
 
   setText("plant-title", plant.name || "등록된 식물");
   setText("plant-subtitle", `${species} · 최근 센서 ${formatTime(sensor.received_at || sensor.updated_at)}`);
-  setText("health-label", kiosk.health_label || statusTitle(kiosk.health_status));
+  setText("health-label", kiosk.health_label || resolveHealthLabel(kiosk.health_status));
   setText("health-score", kiosk.health_score ?? "--");
   setText(
     "confidence-line",
@@ -205,7 +205,19 @@ function renderMain(payload) {
   setText("sensor-moisture", formatNumber(sensor.moisture_value, "%"));
   setText("sensor-temperature", formatNumber(sensor.temperature, "°C"));
   setText("sensor-humidity", formatNumber(sensor.humidity, "%"));
-  setText("sensor-light", formatNumber(sensor.light_level, " lux", 0));
+  
+  const watering = dashboard.latest_watering_log;
+  if (watering && watering.created_at) {
+    const wDate = new Date(watering.created_at);
+    const y = wDate.getFullYear();
+    const m = String(wDate.getMonth() + 1).padStart(2, '0');
+    const d = String(wDate.getDate()).padStart(2, '0');
+    const h = String(wDate.getHours()).padStart(2, '0');
+    const min = String(wDate.getMinutes()).padStart(2, '0');
+    setText("sensor-watering", `${y}-${m}-${d} ${h}:${min}`);
+  } else {
+    setText("sensor-watering", "--");
+  }
 
   const analysisTime = analysis.created_at ? `분석 ${formatTime(analysis.created_at)}` : "분석 대기";
   setText("analysis-time", analysisTime);
@@ -216,7 +228,6 @@ function renderMain(payload) {
   setText("advice-text", analysis.advice || latestState.latest_advice || "사진 분석이 완료되면 추천 조치가 표시됩니다.");
 
   renderAlert(kiosk, analysis);
-  renderWateringList(wateringLogs);
 }
 
 function renderAlert(kiosk, analysis) {
@@ -229,37 +240,10 @@ function renderAlert(kiosk, analysis) {
     return;
   }
 
-  setText("alert-title", statusTitle(kiosk.alert_level));
+  setText("alert-title", resolveHealthLabel(kiosk.alert_level));
   setText("alert-message", kiosk.alert_message || "AI 진단 확인이 필요한 상태입니다.");
   button.disabled = !kiosk.can_confirm_action;
   button.textContent = kiosk.can_confirm_action ? "조치 완료" : analysis.confirmed_at ? "확인 완료됨" : "확인 대기";
-}
-
-function renderWateringList(logs) {
-  const list = $("watering-list");
-  list.textContent = "";
-
-  if (!logs.length) {
-    const item = document.createElement("li");
-    const label = document.createElement("strong");
-    label.textContent = "급수 기록 없음";
-    const meta = document.createElement("span");
-    meta.textContent = "수동 또는 자동 급수 후 표시됩니다.";
-    item.append(label, meta);
-    list.appendChild(item);
-    return;
-  }
-
-  logs.slice(0, 4).forEach((log) => {
-    const item = document.createElement("li");
-    const label = document.createElement("strong");
-    const amount = log.amount_ml ? `${formatNumber(log.amount_ml, " ml", 0)}` : "용량 미기록";
-    label.textContent = `${log.mode === "auto" ? "자동" : "수동"} · ${amount}`;
-    const meta = document.createElement("span");
-    meta.textContent = formatTime(log.created_at || log.started_at);
-    item.append(label, meta);
-    list.appendChild(item);
-  });
 }
 
 async function refreshAndRender() {
