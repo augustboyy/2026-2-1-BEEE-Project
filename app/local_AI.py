@@ -9,7 +9,9 @@ import numpy as np
 from ultralytics import YOLO
 
 # 프로젝트 루트 경로를 sys.path에 추가하여 'app' 패키지를 임포트할 수 있게 합니다.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.bootstrap import build_runtime
 from app.services.camera import capture_photo
@@ -45,11 +47,11 @@ class LocalAnalyzer:
         """YOLO 모델을 싱글톤 방식으로 로드합니다."""
         if cls._model is None:
             # 프로젝트 루트에 있는 best.pt 경로 설정
-            model_path = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), 'best.pt')
-            if not os.path.exists(model_path):
+            model_path = PROJECT_ROOT / "best.pt"
+            if not model_path.exists():
                 print(f"[Warning] YOLO model not found at {model_path}. Using base yolov8n.pt as fallback.")
-                model_path = 'yolov8n.pt'
-            cls._model = YOLO(model_path)
+                model_path = Path("yolov8n.pt")
+            cls._model = YOLO(str(model_path))
         return cls._model
 
     @classmethod

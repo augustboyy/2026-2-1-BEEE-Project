@@ -128,7 +128,7 @@ pip install -r requirements.txt
 ### 4. 전체 실행
 
 ```powershell
-python start_project.py
+python -m app.start_project
 ```
 
 실행 후 주소:
@@ -138,31 +138,27 @@ python start_project.py
 
 ## 환경 변수
 
-`.env.example`를 참고하세요.
+`.env`를 참고하세요.
 
 ### OpenAI 사용
 
 ```powershell
 $env:AI_PROVIDER="openai"
 $env:OPENAI_API_KEY="YOUR_KEY"
-python start_project.py
+python -m app.start_project
 ```
 
-프로젝트 안의 예시 파일:
-
-- [`.env.openai.example`](C:\Users\nemoj\Documents\Rockstar Games\Desktop\전공기프로젝트\.env.openai.example)
+프로젝트 안의 예시 파일: (현재 저장소에는 포함되어 있지 않습니다)
 
 ### Gemini 사용
 
 ```powershell
 $env:AI_PROVIDER="gemini"
 $env:GEMINI_API_KEY="YOUR_KEY"
-python start_project.py
+python -m app.start_project
 ```
 
-프로젝트 안의 예시 파일:
-
-- [`.env.gemini.example`](C:\Users\nemoj\Documents\Rockstar Games\Desktop\전공기프로젝트\.env.gemini.example)
+프로젝트 안의 예시 파일: (현재 저장소에는 포함되어 있지 않습니다)
 
 ## 라즈베리파이 센서 JSON 예시
 
@@ -179,9 +175,7 @@ python start_project.py
 }
 ```
 
-예시 파일:
-
-- [`examples/raspberry_pi_sensor_payload.json`](C:\Users\nemoj\Documents\Rockstar Games\Desktop\전공기프로젝트\examples\raspberry_pi_sensor_payload.json)
+예시 파일 경로: `examples/raspberry_pi_sensor_payload.json` (현재 저장소에는 포함되어 있지 않습니다)
 
 HTTP 전송 대상:
 
@@ -199,9 +193,7 @@ python examples/raspberry_pi_send_sensor.py --plant-id 1
 python examples/raspberry_pi_send_sensor.py --plant-id 1 --loop --interval 15
 ```
 
-예시 스크립트:
-
-- [`examples/raspberry_pi_send_sensor.py`](C:\Users\nemoj\Documents\Rockstar Games\Desktop\전공기프로젝트\examples\raspberry_pi_send_sensor.py)
+예시 스크립트 경로: `examples/raspberry_pi_send_sensor.py` (현재 저장소에는 포함되어 있지 않습니다)
 
 스크립트의 `read_sensor_values_real()` 함수에 실제 센서 라이브러리 코드를 넣으면 됩니다.
 
