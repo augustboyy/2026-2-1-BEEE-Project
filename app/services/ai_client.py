@@ -111,11 +111,13 @@ class AIClient:
         """AI에게 보낼 질문(Prompt)을 생성합니다."""
         sensor_text = json.dumps(latest_sensor or {}, ensure_ascii=False)
         watering_text = json.dumps(latest_watering or {}, ensure_ascii=False)
-        note_text = note.strip() if note else "없음"
+        note_text = note.strip() if note else ""
+        abnormality_note = f" (이상 징후: {note_text})" if note_text else ""
+        note_summary = note_text or "없음"
         
         return (
             "당신은 식물 병해충 및 생육 상태를 분석하는 20년 경력의 수목의학 전문가이자 식물 클리닉 원장입니다. "
-            "현재 식물에 이상이 감지되어 정밀 진단이 필요한 상황입니다. "
+            f"현재 식물에 이상이 감지되어 정밀 진단이 필요한 상황입니다.{abnormality_note} "
             "제공된 사진과 환경 데이터를 바탕으로 전문가의 시각에서 식물을 철저히 분석하세요.\n\n"
             "반드시 아래의 JSON 형식을 지켜 답변하세요:\n"
             "{\n"
@@ -130,7 +132,7 @@ class AIClient:
             f"식물 위치: {plant.get('location') or '미입력'}\n"
             f"최근 센서 데이터: {sensor_text}\n"
             f"최근 급수 기록: {watering_text}\n"
-            f"특이 사항: {note_text}"
+            f"특이 사항: {note_summary}"
         )
 
     def _extract_json(self, text: str) -> dict[str, Any]:
