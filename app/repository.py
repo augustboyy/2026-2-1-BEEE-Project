@@ -280,6 +280,18 @@ class PlantRepository:
         import os
         
         valid_ids = {i for i in kept_ids if i is not None}
+        protected_ids: set[int] = set()
+        for row in self.database.fetchall(
+            "SELECT DISTINCT image_id FROM analysis_results WHERE plant_id = ? AND image_id IS NOT NULL",
+            (plant_id,),
+        ):
+            protected_ids.add(int(row["image_id"]))
+        for row in self.database.fetchall(
+            "SELECT DISTINCT image_id FROM camera_captures WHERE plant_id = ? AND image_id IS NOT NULL",
+            (plant_id,),
+        ):
+            protected_ids.add(int(row["image_id"]))
+        valid_ids |= protected_ids
         if not valid_ids:
             return
 
@@ -299,8 +311,7 @@ class PlantRepository:
                 except Exception:
                     pass
             
-            # DB에서 삭제 (연관 데이터 포함)
-            self.database.execute("DELETE FROM camera_captures WHERE image_id = ?", (img_id,))
+            # DB에서 삭제 (참조 무결성을 해치지 않는 범위에서만 제거)
             self.database.execute("DELETE FROM uploaded_images WHERE id = ?", (img_id,))
 
     def get_uploaded_image(self, image_id: int) -> dict[str, Any] | None:

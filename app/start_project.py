@@ -10,6 +10,12 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
+
+# 패키지 실행/스크립트 실행 모두에서 app 모듈을 찾도록 프로젝트 루트를 보장합니다.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.config import load_settings
 
@@ -49,6 +55,9 @@ def main() -> None:
         **popen_kwargs
     )
 
+    dashboard_script = str((PROJECT_ROOT / "app" / "dashboard.py").resolve())
+    local_ai_script = str((PROJECT_ROOT / "app" / "local_AI.py").resolve())
+
     # 2. 대시보드 (Streamlit) 실행
     dashboard_process = subprocess.Popen(
         [
@@ -56,7 +65,7 @@ def main() -> None:
             "-m",
             "streamlit",
             "run",
-            "dashboard.py",
+            dashboard_script,
             "--server.headless=true",
             f"--server.address={settings.dashboard_host}",
             f"--server.port={settings.dashboard_port}",
@@ -67,7 +76,7 @@ def main() -> None:
 
     # 3. 로컬 AI 카메라 서비스 실행 (10분 간격 촬영)
     local_ai_process = subprocess.Popen(
-        [python_executable, "src/local_AI.py"],
+        [python_executable, local_ai_script],
         env=env,
         **popen_kwargs
     )

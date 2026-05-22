@@ -128,7 +128,7 @@ pip install -r requirements.txt
 ### 4. 전체 실행
 
 ```powershell
-python start_project.py
+python -m app.start_project
 ```
 
 실행 후 주소:
@@ -145,7 +145,7 @@ python start_project.py
 ```powershell
 $env:AI_PROVIDER="openai"
 $env:OPENAI_API_KEY="YOUR_KEY"
-python start_project.py
+python -m app.start_project
 ```
 
 프로젝트 안의 예시 파일:
@@ -157,7 +157,7 @@ python start_project.py
 ```powershell
 $env:AI_PROVIDER="gemini"
 $env:GEMINI_API_KEY="YOUR_KEY"
-python start_project.py
+python -m app.start_project
 ```
 
 프로젝트 안의 예시 파일:

@@ -6,11 +6,18 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
+import sys
 from typing import Any
 
 import httpx
 import pandas as pd
 import streamlit as st
+
+# Streamlit 실행 시에도 app 패키지를 찾도록 프로젝트 루트를 보장합니다.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.bootstrap import build_runtime
 from app.config import load_settings
@@ -473,7 +480,7 @@ def main() -> None:
         st.success("API 연결됨 | Google Gemini 사용 중")
     except Exception as error:
         st.error(f"FastAPI 서버 연결 실패: {error}")
-        st.info("먼저 `python start_project.py` 또는 FastAPI 서버를 실행해 주세요.")
+        st.info("먼저 `python -m app.start_project` 또는 FastAPI 서버를 실행해 주세요.")
         return
 
     # 식물이 등록되지 않았거나 등록 폼을 열었을 때
