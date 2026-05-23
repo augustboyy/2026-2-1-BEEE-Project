@@ -470,14 +470,17 @@ textarea:focus {
   height: 250px;
   border-radius: 50%;
   background: conic-gradient(from 225deg, #ef4444 0%, #ef4444 22.5%, #f97316 22.5%, #f97316 45%, #22c55e 45%, #22c55e 75%, transparent 75%);
-  -webkit-mask: radial-gradient(circle, transparent 78%, black 79%);
-  mask: radial-gradient(circle, transparent 78%, black 79%);
+  /* closest-side를 추가하여 기준점을 원의 테두리로 맞춤 */
+  -webkit-mask: radial-gradient(circle closest-side, transparent 78%, black 79%);
+  mask: radial-gradient(circle closest-side, transparent 78%, black 79%);
+  z-index: 1;
 }
 
 .ticks {
   position: absolute;
   width: 100%;
   height: 100%;
+  z-index: 2; /* 추가: 게이지 아크(1) 위로 숫자를 올림 */
 }
 
 .tick {
@@ -485,12 +488,12 @@ textarea:focus {
   left: 50%;
   top: 50%;
   font-size: 14px;
-  font-weight: 800;
-  color: var(--muted);
+  font-weight: 900; /* 숫자를 더 또렷하게 보이도록 굵기 최대치 적용 */
+  color: #000000; /* 완전 검정색으로 변경 */
   transform:
     translate(-50%, -50%)
     rotate(calc(-135deg + (var(--val) * 2.7deg)))
-    translateY(-105px)
+    translateY(-111px) /* 숫자를 밀어내는 거리를 정중앙에 맞게 111px로 수정 */
     rotate(calc(135deg - (var(--val) * 2.7deg)));
 }
 
@@ -813,14 +816,17 @@ textarea:focus {
   height: 250px;
   border-radius: 50%;
   background: conic-gradient(from 225deg, #ef4444 0%, #ef4444 22.5%, #f97316 22.5%, #f97316 45%, #22c55e 45%, #22c55e 75%, transparent 75%);
-  -webkit-mask: radial-gradient(circle, transparent 78%, black 79%);
-  mask: radial-gradient(circle, transparent 78%, black 79%);
+  /* closest-side를 추가하여 기준점을 원의 테두리로 맞춤 */
+  -webkit-mask: radial-gradient(circle closest-side, transparent 78%, black 79%);
+  mask: radial-gradient(circle closest-side, transparent 78%, black 79%);
+  z-index: 1;
 }
 
 .ticks {
   position: absolute;
   width: 100%;
   height: 100%;
+  z-index: 2; /* 추가: 게이지 아크(1) 위로 숫자를 올림 */
 }
 
 .tick {
@@ -828,12 +834,12 @@ textarea:focus {
   left: 50%;
   top: 50%;
   font-size: 14px;
-  font-weight: 800;
-  color: var(--muted);
+  font-weight: 900; /* 숫자를 더 또렷하게 보이도록 굵기 최대치 적용 */
+  color: #000000; /* 완전 검정색으로 변경 */
   transform:
     translate(-50%, -50%)
     rotate(calc(-135deg + (var(--val) * 2.7deg)))
-    translateY(-105px)
+    translateY(-111px) /* 숫자를 밀어내는 거리를 정중앙에 맞게 111px로 수정 */
     rotate(calc(135deg - (var(--val) * 2.7deg)));
 }
 
@@ -965,14 +971,17 @@ textarea:focus {
   height: 250px;
   border-radius: 50%;
   background: conic-gradient(from 225deg, #ef4444 0%, #ef4444 22.5%, #f97316 22.5%, #f97316 45%, #22c55e 45%, #22c55e 75%, transparent 75%);
-  -webkit-mask: radial-gradient(circle, transparent 78%, black 79%);
-  mask: radial-gradient(circle, transparent 78%, black 79%);
+  /* closest-side를 추가하여 기준점을 원의 테두리로 맞춤 */
+  -webkit-mask: radial-gradient(circle closest-side, transparent 78%, black 79%);
+  mask: radial-gradient(circle closest-side, transparent 78%, black 79%);
+  z-index: 1;
 }
 
 .ticks {
   position: absolute;
   width: 100%;
   height: 100%;
+  z-index: 2; /* 추가: 게이지 아크(1) 위로 숫자를 올림 */
 }
 
 .tick {
@@ -980,12 +989,12 @@ textarea:focus {
   left: 50%;
   top: 50%;
   font-size: 14px;
-  font-weight: 800;
-  color: var(--muted);
+  font-weight: 900; /* 숫자를 더 또렷하게 보이도록 굵기 최대치 적용 */
+  color: #000000; /* 완전 검정색으로 변경 */
   transform:
     translate(-50%, -50%)
     rotate(calc(-135deg + (var(--val) * 2.7deg)))
-    translateY(-105px)
+    translateY(-111px) /* 숫자를 밀어내는 거리를 정중앙에 맞게 111px로 수정 */
     rotate(calc(135deg - (var(--val) * 2.7deg)));
 }
 
