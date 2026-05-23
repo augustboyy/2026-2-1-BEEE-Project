@@ -46,8 +46,8 @@ class LocalAnalyzer:
     def get_model(cls):
         """YOLO 모델을 싱글톤 방식으로 로드합니다."""
         if cls._model is None:
-            # 프로젝트 루트에 있는 best.pt 경로 설정
-            model_path = PROJECT_ROOT / "best.pt"
+            # 프로젝트 루트 하위 weights 폴더에 있는 best.pt 경로 설정
+            model_path = PROJECT_ROOT / "weights" / "best.pt"
             if not model_path.exists():
                 print(f"[Warning] YOLO model not found at {model_path}. Using base yolov8n.pt as fallback.")
                 model_path = Path("yolov8n.pt")
