@@ -267,7 +267,7 @@ def render_status_banner(dashboard: dict[str, Any]) -> None:
 
 def render_metrics(dashboard: dict[str, Any]) -> None:
     """
-    주요 지표(수분, 온습도, 급수 필요도 등)를 카드 형태로 렌더링합니다.
+    주요 지표(토양 습도, 온도, 급수 필요도 등)를 카드 형태로 렌더링합니다.
     """
     sensor = dashboard.get("latest_sensor_state") or {}
     latest_state = dashboard.get("latest_state") or {}
@@ -275,11 +275,11 @@ def render_metrics(dashboard: dict[str, Any]) -> None:
     counts = dashboard.get("counts") or {}
     col1, col2, col3, col4 = st.columns(4)
     col1.markdown(
-        f"<div class='metric-box'><div class='eyebrow'>토양 수분</div><h3>{sensor.get('moisture_value', '-')}%</h3><div class='subtle'>{fmt_time(sensor.get('received_at'))}</div></div>",
+        f"<div class='metric-box'><div class='eyebrow'>토양 습도</div><h3>{sensor.get('moisture_value', '-')}%</h3><div class='subtle'>{fmt_time(sensor.get('received_at'))}</div></div>",
         unsafe_allow_html=True,
     )
     col2.markdown(
-        f"<div class='metric-box'><div class='eyebrow'>온도 / 습도</div><h3>{sensor.get('temperature', '-')}°C / {sensor.get('humidity', '-')}%</h3><div class='subtle'>수집됨</div></div>",
+        f"<div class='metric-box'><div class='eyebrow'>온도</div><h3>{sensor.get('temperature', '-')}°C</h3><div class='subtle'>수집됨</div></div>",
         unsafe_allow_html=True,
     )
     col3.markdown(
@@ -381,8 +381,7 @@ def render_sensor_form(plant_id: int) -> None:
     st.markdown("<div class='section-box'>", unsafe_allow_html=True)
     st.subheader("센서 입력 / 데모 생성")
     with st.form("sensor_form"):
-        moisture = st.number_input("토양 수분(%)", min_value=0.0, max_value=100.0, value=45.0, step=0.1)
-        humidity = st.number_input("습도(%)", min_value=0.0, max_value=100.0, value=55.0, step=0.1)
+        moisture = st.number_input("토양 습도(%)", min_value=0.0, max_value=100.0, value=45.0, step=0.1)
         temperature = st.number_input("온도(°C)", min_value=-20.0, max_value=60.0, value=23.0, step=0.1)
         submitted = st.form_submit_button("센서값 저장", use_container_width=True)
         if submitted:
@@ -391,7 +390,6 @@ def render_sensor_form(plant_id: int) -> None:
                 f"/api/plants/{plant_id}/sensor-logs",
                 json={
                     "moisture_value": moisture,
-                    "humidity": humidity,
                     "temperature": temperature,
                     "source": "streamlit-manual",
                 },
@@ -412,9 +410,9 @@ def render_history_tab(dashboard: dict[str, Any]) -> None:
         sensor_df = pd.DataFrame(sensor_logs)
         sensor_df["received_at"] = pd.to_datetime(sensor_df["received_at"])
         sensor_df = sensor_df.set_index("received_at")
-        st.line_chart(sensor_df[["moisture_value", "humidity", "temperature"]], use_container_width=True)
+        st.line_chart(sensor_df[["moisture_value", "temperature"]], use_container_width=True)
         st.dataframe(
-            sensor_df.reset_index()[["received_at", "moisture_value", "humidity", "temperature", "source"]],
+            sensor_df.reset_index()[["received_at", "moisture_value", "temperature", "source"]],
             use_container_width=True,
         )
     else:
@@ -504,7 +502,6 @@ def main() -> None:
         render_history_tab(dashboard)
     with tab3:
         render_system_tab(dashboard)
-
 
 if __name__ == "__main__":
     main()

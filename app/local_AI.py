@@ -3,6 +3,7 @@ import datetime
 import os
 import sys
 import time
+import uuid
 from pathlib import Path
 import cv2
 import numpy as np
@@ -14,7 +15,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.bootstrap import build_runtime
-from app.services.camera import capture_photo
 
 
 # =================================================================
@@ -162,10 +162,11 @@ def delete_image_from_disk_and_db(repository, image_id: int):
         repository.database.execute("DELETE FROM uploaded_images WHERE id = ?", (image_id,))
         repository.database.execute("DELETE FROM camera_captures WHERE image_id = ?", (image_id,))
 
-async def trigger_cloud_ai(runtime, plant, image_bytes, note):
+async def trigger_cloud_ai(runtime, plant, image_path: str, note: str, image_id: int):
     """이상이 감지되었을 때 Cloud AI(Gemini)를 호출합니다."""
     print(f"[Trigger] Abnormality detected! Calling Cloud AI for plant: {plant['name']}")
     try:
+        image_bytes = Path(image_path).read_bytes()
         # 최신 센서/급수 데이터 가져오기
         latest_sensor = runtime.repository.get_latest_sensor_state(plant["id"])
         latest_watering = runtime.repository.get_latest_watering_log(plant["id"])
@@ -180,11 +181,18 @@ async def trigger_cloud_ai(runtime, plant, image_bytes, note):
             note=f"[Local AI 자동 감지] {note}",
         )
         
-        # 분석 결과 DB 저장 (repository.add_analysis_result 사용)
-        # 1. 먼저 이미지 저장 (수동 업로드와 동일한 경로)
-        # Note: 이미지 저장은 loop에서 이미 수행하므로, 저장된 image_id를 넘겨받아야 함.
-        # 이 함수를 호출하는 쪽에서 이미 저장된 image_id를 알고 있다고 가정.
-        return ai_payload
+        analysis = runtime.repository.add_analysis_result(
+            plant_id=plant["id"],
+            job_id=str(uuid.uuid4()),
+            image_id=image_id,
+            provider=ai_payload["provider"],
+            model_name=ai_payload["model_name"],
+            request_note=f"[Local AI 자동 감지] {note}",
+            prompt_text=ai_payload["prompt_text"],
+            response_json=ai_payload["result"],
+            raw_response_text=ai_payload["raw_response_text"],
+        )
+        return analysis
     except Exception as e:
         print(f"[Error] Cloud AI Trigger failed: {e}")
         return None
@@ -209,15 +217,32 @@ async def run_local_ai_loop():
             plant_id = plant["id"]
             now = datetime.datetime.now()
             
-            # 1. 사진 촬영
-            image_bytes = capture_photo()
+            # 1. 고해상도(8MP) 원본 사진 촬영 및 저장
             file_name = f"local_ai_{now.strftime('%Y%m%d_%H%M%S')}.jpg"
-            file_path = uploads_dir / file_name
-            with open(file_path, "wb") as f:
-                f.write(image_bytes)
+            original_file_path = uploads_dir / file_name
+            
+            from app.services.camera import capture_photo_to_disk, create_preprocessed_temp
+            capture_photo_to_disk(str(original_file_path))
+            
+            # 2. 로컬 분석(YOLO)을 위한 640px 임시 이미지 생성 (메모리 최적화)
+            temp_640_path = uploads_dir / f"temp_640_{uuid.uuid4().hex}.jpg"
+            create_preprocessed_temp(
+                original_path=str(original_file_path),
+                temp_path=str(temp_640_path),
+                max_dim=640,
+                apply_enhancement=False # OpenCV에서 대비 조절 등은 직접 할 수 있으므로 여기선 리사이즈만 수행
+            )
+            
+            # 파일에서 바이트 읽어오기 (기존 get_plant_metrics 유지)
+            with open(temp_640_path, "rb") as f:
+                image_bytes_640 = f.read()
                 
-            # 2. 로컬 분석 수행
-            current_metrics = analyzer.get_plant_metrics(image_bytes)
+            # 임시 파일 즉시 삭제
+            if temp_640_path.exists():
+                os.remove(temp_640_path)
+                
+            # 3. 로컬 분석 수행 (640px 버전으로 실행하여 RAM/CPU 최적화)
+            current_metrics = analyzer.get_plant_metrics(image_bytes_640)
             
             # 3. 이전 데이터와 비교를 위해 DB에서 현재 상태 가져오기
             state = repository.database.fetchone("SELECT * FROM latest_state WHERE plant_id = ?", (plant_id,))
@@ -266,19 +291,15 @@ async def run_local_ai_loop():
             with repository.database.transaction():
                 new_image = repository.save_uploaded_image(
                     plant_id=plant_id,
-                    file_path=str(file_path.resolve()),
+                    file_path=str(original_file_path.resolve()),
                     original_name=file_name,
                     mime_type="image/jpeg"
                 )
                 new_image_id = new_image["id"]
-                
-                # Cloud AI가 이미 호출된 경우 repository 내부에서 latest_state를 업데이트하므로
-                # 여기서 중복 호출되지 않도록 주의해야 하지만, analyze_uploaded_photo 내부에서 save_uploaded_image를 호출하므로
-                # 구조를 맞춰야 함. 여기서는 loop가 직접 관리하므로 수동으로 처리.
             
             # 6. 이상 감지 시 Cloud AI 호출
             if abnormality_note:
-                await trigger_cloud_ai(runtime, plant, image_bytes, abnormality_note)
+                await trigger_cloud_ai(runtime, plant, str(original_file_path.resolve()), abnormality_note, new_image_id)
             
             print(f"[Local AI] Analysis complete. Abnormal: {abnormality_note is not None}. Sleeping...")
             

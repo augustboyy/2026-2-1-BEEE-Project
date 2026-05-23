@@ -59,25 +59,43 @@ class AIClient:
     async def analyze_plant_photo(
         self,
         plant: dict[str, Any],
-        image_bytes: bytes,
         mime_type: str,
+        image_bytes: bytes | None = None,
+        image_path: str | None = None,
         latest_sensor: dict[str, Any] | None = None,
         latest_watering: dict[str, Any] | None = None,
         note: str | None = None,
     ) -> dict[str, Any]:
         """
         Gemini를 호출하여 식물을 분석합니다.
+        메모리 부족을 막기 위해 8MP 원본 대신 1536px로 축소/전처리된 임시 파일을 사용합니다.
         """
         if not self.settings.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY가 설정되지 않았습니다.")
 
-        # 이미지 처리 (PIL을 사용하여 최적화)
-        img = Image.open(BytesIO(image_bytes))
-        img.thumbnail((2048, 2048))
-
-        prompt = self._build_prompt(plant, latest_sensor, latest_watering, note)
+        import os
+        import uuid
+        from app.services.camera import create_preprocessed_temp
+        
+        temp_1536_path = os.path.join(self.settings.uploads_dir, f"temp_1536_{uuid.uuid4().hex}.jpg")
         
         try:
+            # 1. 1536px 전처리본 생성 (파일 경로가 주어졌으면 파일에서, 바이트면 바이트에서)
+            if image_path and os.path.exists(image_path):
+                create_preprocessed_temp(image_path, temp_1536_path, max_dim=1536, apply_enhancement=True)
+            elif image_bytes:
+                # API로 수동 업로드된 경우 바이트 사용
+                with open(temp_1536_path, "wb") as f:
+                    f.write(image_bytes)
+                create_preprocessed_temp(temp_1536_path, temp_1536_path, max_dim=1536, apply_enhancement=True)
+            else:
+                raise ValueError("image_bytes 또는 image_path 둘 중 하나는 제공되어야 합니다.")
+
+            # 2. PIL로 가볍게 열기
+            img = Image.open(temp_1536_path)
+
+            prompt = self._build_prompt(plant, latest_sensor, latest_watering, note)
+            
             # Gemini 모델 호출
             response = self.client.models.generate_content(
                 model=self.model_id,
@@ -100,6 +118,12 @@ class AIClient:
             }
         except Exception as e:
             raise RuntimeError(f"Gemini API 호출 중 오류 발생: {str(e)}")
+        finally:
+            if 'img' in locals():
+                img.close()
+            if os.path.exists(temp_1536_path):
+                try: os.remove(temp_1536_path)
+                except: pass
 
     def _build_prompt(
         self,
@@ -184,21 +208,24 @@ class AIClient:
         """
         카메라로 실물을 촬영하고, 사진을 AI에게 보내 식물이 무엇인지 한 가지 추측값만 반환받습니다.
         """
-        from app.services.camera import capture_photo
+        from app.services.camera import capture_photo_to_disk, create_preprocessed_temp
+        import os
+        import uuid
+        
+        original_path = os.path.join(self.settings.uploads_dir, f"temp_species_{uuid.uuid4().hex}.jpg")
+        temp_1536_path = os.path.join(self.settings.uploads_dir, f"temp_1536_{uuid.uuid4().hex}.jpg")
         
         try:
-            # 1. 카메라 촬영 (새로운 파이썬 파일 호출)
-            image_bytes = capture_photo()
-        except Exception as e:
-            raise RuntimeError(f"카메라 촬영 실패: {e}")
-
-        # 2. 이미지 처리
-        img = Image.open(BytesIO(image_bytes)) # 이미지 사용 후 바로 폐기됨
-        img.thumbnail((1024, 1024))
-        
-        prompt = "이 식물이 무엇인지 가장 가능성 높은 식물 종(species) 단 하나만 문자열로 알려줘. 다른 설명, 인사말, 구두점 없이 딱 이름만 말해."
-        
-        try:
+            # 1. 고해상도 촬영 후 디스크 저장
+            capture_photo_to_disk(original_path)
+            # 2. 1536px로 리사이징
+            create_preprocessed_temp(original_path, temp_1536_path, max_dim=1536)
+            
+            # 3. 이미지 처리
+            img = Image.open(temp_1536_path) 
+            
+            prompt = "이 식물이 무엇인지 가장 가능성 높은 식물 종(species) 단 하나만 문자열로 알려줘. 다른 설명, 인사말, 구두점 없이 딱 이름만 말해."
+            
             # Gemini 모델 호출
             response = self.client.models.generate_content(
                 model=self.model_id,
@@ -210,3 +237,53 @@ class AIClient:
             return response.text.strip()
         except Exception as e:
             raise RuntimeError(f"식물 추정 중 오류 발생: {str(e)}")
+        finally:
+            if 'img' in locals(): img.close()
+            if os.path.exists(temp_1536_path):
+                try: os.remove(temp_1536_path)
+                except: pass
+            if os.path.exists(original_path):
+                try: os.remove(original_path)
+                except: pass
+
+    async def ask_plant_question(self, plant: dict[str, Any], image_path: str, question: str) -> str:
+        """
+        카메라로 찍은 사진과 사용자의 텍스트 질문을 Gemini에게 보내서 직접적인 답변을 받습니다.
+        메모리 부족을 방지하기 위해 8MP 원본 대신 1536px로 전처리된 임시 파일을 생성하여 사용 후 삭제합니다.
+        """
+        if not self.settings.gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY가 설정되지 않았습니다.")
+
+        import os
+        import uuid
+        from app.services.camera import create_preprocessed_temp
+        
+        temp_1536_path = os.path.join(self.settings.uploads_dir, f"temp_1536_{uuid.uuid4().hex}.jpg")
+        
+        try:
+            create_preprocessed_temp(image_path, temp_1536_path, max_dim=1536, apply_enhancement=True)
+            img = Image.open(temp_1536_path)
+
+            prompt = (
+                f"당신은 친절하고 전문적인 20년 경력의 식물 전문가(수목의학 전문가)입니다.\n"
+                f"현재 식물 이름: {plant['name']}\n"
+                f"식물 종류: {plant.get('species') or '미입력'}\n"
+                f"사용자의 질문: \"{question}\"\n\n"
+                f"첨부된 사진은 지금 막 촬영된 식물의 현재 상태입니다.\n"
+                f"이 사진을 자세히 관찰하고 사용자의 질문에 대해 명확, 친절하고 도움이 되는 답변을 작성해주세요.\n"
+                f"단, 키오스크 화면에 표시되어야 하므로 **답변은 반드시 4문장 이내로 짧고 간결하게 작성**해 주세요."
+            )
+
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=[prompt, img],
+                config={"temperature": 0.3}
+            )
+            return response.text.strip()
+        except Exception as e:
+            raise RuntimeError(f"Gemini AI 질문 처리 중 오류 발생: {str(e)}")
+        finally:
+            if 'img' in locals(): img.close()
+            if os.path.exists(temp_1536_path):
+                try: os.remove(temp_1536_path)
+                except: pass

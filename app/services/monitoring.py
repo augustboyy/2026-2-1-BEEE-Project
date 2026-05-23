@@ -15,6 +15,8 @@ from PIL import Image
 from app.config import Settings
 from app.repository import PlantRepository
 from app.schemas import SensorLogRequest, WateringLogRequest
+
+WATERING_SIGNAL = "WATER!"
 from app.services.ai_client import AIClient
 
 
@@ -53,7 +55,6 @@ class MonitoringService:
         return self.repository.add_sensor_log(
             plant_id,
             payload.moisture_value,
-            payload.humidity,
             payload.temperature,
             None, # light_level is removed
             payload.source,
@@ -72,6 +73,28 @@ class MonitoringService:
             note=payload.note,
             started_at=payload.started_at,
             ended_at=payload.ended_at,
+        )
+
+    def log_watering_signal(self, plant_id: int | None, signal: str, source: str) -> dict:
+        """외부 장치로부터 급수 신호를 받아 로그로 저장합니다."""
+        clean_signal = signal.strip()
+        if clean_signal != WATERING_SIGNAL:
+            raise ValueError(f"지원하지 않는 급수 신호입니다: {clean_signal}")
+
+        if plant_id is None:
+            plant = self.repository.get_current_plant()
+            if plant is None:
+                raise LookupError("활성화된 식물이 없습니다.")
+            plant_id = plant["id"]
+        else:
+            plant = self.repository.get_plant(plant_id)
+            if plant is None:
+                raise LookupError("식물을 찾을 수 없습니다.")
+
+        return self.repository.add_watering_log(
+            plant_id=plant_id,
+            mode="external-signal",
+            note=f"{source}:{clean_signal}",
         )
 
     async def analyze_uploaded_photo(
@@ -167,6 +190,48 @@ class MonitoringService:
         if analysis is None:
             return None
         return self.repository.build_dashboard(analysis["plant_id"])
+
+    async def ask_question_with_camera(self, plant_id: int, question_text: str) -> dict:
+        """
+        사용자의 질문을 받고 실시간으로 카메라로 사진을 촬영한 뒤 Gemini에게 전달하여 답변을 받아냅니다.
+        라즈베리파이의 메모리 부족을 막기 위해 사진은 디스크에 직접 저장되며, AI 전송 후 즉시 삭제됩니다.
+        """
+        plant = self.repository.get_plant(plant_id)
+        if plant is None:
+            raise LookupError("식물을 찾을 수 없습니다.")
+
+        from app.services.camera import capture_photo_to_disk
+        import os
+        import uuid
+        
+        # 안전한 임시 파일 경로 (uploads_dir 내)
+        temp_image_path = str(Path(self.settings.uploads_dir) / f"temp_qa_{uuid.uuid4().hex}.jpg")
+
+        try:
+            # 1. RAM에 사진 바이트를 담지 않고 디스크로 바로 저장
+            capture_photo_to_disk(temp_image_path)
+
+            # 2. AI 질문 호출 (디스크 경로를 전달하여 내부에서 lazy loading 수행)
+            answer_text = await self.ai_client.ask_plant_question(plant, temp_image_path, question_text)
+
+            # 3. DB에 Q&A 기록 저장
+            question_record = self.repository.save_user_question(
+                plant_id=plant_id,
+                question_text=question_text,
+                answer_text=answer_text,
+                provider="gemini",
+                model_name=self.ai_client.model_id
+            )
+            return question_record
+        except Exception as e:
+            raise RuntimeError(f"질문 처리 중 오류 발생: {e}")
+        finally:
+            # 4. 사용 완료된 임시 사진은 디스크에서 즉시 삭제
+            if os.path.exists(temp_image_path):
+                try:
+                    os.remove(temp_image_path)
+                except Exception:
+                    pass
 
     # --- 헬퍼 메서드 ---
     def _validate_upload(self, file_name: str, file_bytes: bytes, mime_type: str) -> None:

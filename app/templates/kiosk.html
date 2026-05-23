@@ -36,11 +36,11 @@
           </label>
           <label>
             <span>식물 종</span>
-            <input id="plant-species-input" name="species" type="text" autocomplete="off" placeholder="직접 입력하거나 촬영 판별을 사용하세요" />
+            <input id="plant-species-input" name="species" type="text" autocomplete="off" placeholder="직접 입력하거나 AI 촬영 판별을 사용하세요" />
           </label>
           <div id="identify-result" class="inline-result" role="status"></div>
           <div class="button-row">
-            <button id="camera-identify-button" class="touch-button secondary-button" type="button">이미지로 식물 추정하기</button>
+            <button id="camera-identify-button" class="touch-button secondary-button" type="button">사진찍어 식물 추정하기</button>
             <button class="touch-button primary-button" type="submit">등록 완료</button>
           </div>
         </form>
@@ -76,32 +76,54 @@
 
         <section class="status-board">
           <div class="health-panel">
-            <span id="health-label" class="status-badge">대기</span>
-            <div class="score-row">
-              <strong id="health-score">--</strong>
-              <span>점</span>
+            <!-- 좌측 건강 점수 텍스트 영역 -->
+            <div class="health-info-side">
+              <span class="health-title-side">건강 점수</span>
+              <div class="health-score-side">
+                <strong id="health-score">--</strong>
+                <span>점</span>
+              </div>
+              <span id="health-label" class="status-badge">대기</span>
             </div>
-            <div class="score-track" aria-hidden="true"><span id="score-fill"></span></div>
-            <p id="confidence-line" class="muted-line">건강점수 대기 중</p>
+
+            <!-- 우측 도넛형 게이지 영역 -->
+            <div id="health-gauge" class="gauge-card" style="--value: 0;">
+              <div class="gauge-arc"></div>
+              
+              <div class="ticks">
+                <span class="tick" style="--val: 0;">0</span>
+                <span class="tick" style="--val: 10;">10</span>
+                <span class="tick" style="--val: 20;">20</span>
+                <span class="tick" style="--val: 30;">30</span>
+                <span class="tick" style="--val: 40;">40</span>
+                <span class="tick" style="--val: 50;">50</span>
+                <span class="tick" style="--val: 60;">60</span>
+                <span class="tick" style="--val: 70;">70</span>
+                <span class="tick" style="--val: 80;">80</span>
+                <span class="tick" style="--val: 90;">90</span>
+                <span class="tick" style="--val: 100;">100</span>
+              </div>
+            
+              <div class="needle-wrapper">
+                <div class="needle"></div>
+                <div class="needle-center"></div>
+              </div>
+            </div>
           </div>
 
           <div class="sensor-grid" aria-label="최신 센서값">
             <div class="sensor-cell">
-              <span>토양 수분</span>
-              <strong id="sensor-moisture">--</strong>
-            </div>
-            <div class="sensor-cell">
-              <span>온도</span>
-              <strong id="sensor-temperature">--</strong>
-            </div>
-            <div class="sensor-cell">
-              <span>습도</span>
-              <strong id="sensor-humidity">--</strong>
-            </div>
-            <div class="sensor-cell">
-              <span>최근 급수</span>
-              <strong id="sensor-watering">--</strong>
-            </div>
+            <span>토양 습도</span>
+            <strong id="sensor-moisture">--</strong>
+          </div>
+          <div class="sensor-cell">
+            <span>온도</span>
+            <strong id="sensor-temperature">--</strong>
+          </div>
+          <div class="sensor-cell">
+            <span>최근 급수</span>
+            <strong id="sensor-watering">--</strong>
+          </div>
           </div>
         </section>
 
@@ -128,14 +150,14 @@
           <h2 id="question-title">식물 관리 질문</h2>
           <button id="close-question-button" class="icon-button" type="button" aria-label="닫기">×</button>
         </div>
-        <textarea id="question-input" rows="4" placeholder="예: 오늘 물을 더 줘도 될까요?"></textarea>
-        <div id="answer-box" class="answer-box">질문을 입력하면 데모 답변을 보여드립니다.</div>
+        <textarea id="question-input" rows="4" placeholder="예: 잎 끝이 마르는 것 같은데 어떻게 해야 할까요?"></textarea>
+        <div id="answer-box" class="answer-box hidden"></div>
         <div class="button-row modal-actions">
           <button id="ask-question-button" class="touch-button primary-button" type="button">질문 보내기</button>
         </div>
       </div>
     </div>
 
-    <script src="/static/kiosk.js?v=2" defer></script>
+    <script src="/static/kiosk_v4.js" defer></script>
   </body>
 </html>

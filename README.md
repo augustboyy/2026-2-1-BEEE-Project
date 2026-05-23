@@ -72,7 +72,7 @@ pip freeze > requirements.txt
 ## 프로젝트 목표
 
 - 식물 사진 분석 결과를 외부 AI에서 받아오기
-- 토양 수분, 온도, 습도, 광량 같은 센서 데이터를 주기적으로 저장하기
+- 토양 습도, 온도 같은 센서 데이터를 주기적으로 저장하기
 - 급수 기록과 AI 분석 기록을 한 DB에서 함께 관리하기
 - 사용자가 현재 상태, 최신 AI 조언, 업데이트 시각, 확인 시각을 한 번에 이해할 수 있게 하기
 
@@ -168,9 +168,7 @@ python -m app.start_project
 {
   "plant_id": 1,
   "moisture_value": 43.7,
-  "humidity": 56.2,
   "temperature": 24.1,
-  "light_level": 6280.0,
   "source": "raspberry-pi"
 }
 ```
@@ -197,6 +195,54 @@ python examples/raspberry_pi_send_sensor.py --plant-id 1 --loop --interval 15
 
 스크립트의 `read_sensor_values_real()` 함수에 실제 센서 라이브러리 코드를 넣으면 됩니다.
 
+## 아두이노 시리얼(JSON) 수신
+
+아두이노에서 시리얼로 JSON을 보내면, 파이썬 리스너가 수신해 API로 전달합니다.
+
+필수 환경 변수:
+
+- `SERIAL_PORT` (예: `/dev/ttyACM0` 또는 `COM3`)
+- `SERIAL_BAUD` (기본값 115200)
+
+예시 (센서 데이터):
+
+```json
+{
+  "plant_id": 1,
+  "moisture_value": 43.7,
+  "temperature": 24.1,
+  "source": "arduino"
+}
+```
+
+`humidity` 키로 보내도 동일하게 토양 습도로 처리됩니다.
+
+예시 (급수 신호):
+
+```json
+{
+  "plant_id": 1,
+  "signal": "WATER!",
+  "source": "arduino"
+}
+```
+
+## 급수 신호 전송 예시
+
+급수기가 동작했을 때 `"WATER!"` 신호를 전송하면 수신 시각이 급수 기록으로 저장됩니다.
+
+```json
+{
+  "plant_id": 1,
+  "signal": "WATER!",
+  "source": "arduino"
+}
+```
+
+HTTP 전송 대상:
+
+- `POST /api/external/watering-signal`
+
 ## 주요 API
 
 - `POST /api/plants`
@@ -209,6 +255,8 @@ python examples/raspberry_pi_send_sensor.py --plant-id 1 --loop --interval 15
   수동 센서값 저장
 - `POST /api/external/sensor-data`
   외부 장치가 JSON 센서 데이터를 전송
+- `POST /api/external/watering-signal`
+  외부 장치가 급수 신호를 전송
 - `POST /api/plants/{plant_id}/watering-logs`
   급수 기록 저장
 - `POST /api/plants/{plant_id}/analyze-photo`
@@ -226,7 +274,7 @@ pytest
 
 ## 아두이노 센서 데이터 보내는 방법
 - 필요한 실제 데이터:
-1. 센서 데이터: 아두이노(Arduino), 라즈베리 파이(Raspberry Pi), 또는 ESP32와 같은 마이크로컨트롤러가 주기적으로 토양 수분, 온/습도, 조도 데이터를 측정해야 합니다.
+1. 센서 데이터: 아두이노(Arduino), 라즈베리 파이(Raspberry Pi), 또는 ESP32와 같은 마이크로컨트롤러가 주기적으로 토양 습도, 온도 데이터를 측정해야 합니다.
 2. 급수 데이터: 자동 급수 펌프가 작동할 때마다 작동 시간과 급수량을 전송해야 합니다.
 
   데이터 수신 방법 (REST API 활용):
@@ -239,9 +287,7 @@ pytest
         {
         "plant_id": 1,
         "moisture_value": 42.5,
-	    "humidity": 55.0,
         "temperature": 24.3,
-        "light_level": 6500,
         "source": "arduino-sensor-node-1"
 		}
    ```

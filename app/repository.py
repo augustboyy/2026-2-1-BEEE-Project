@@ -280,18 +280,6 @@ class PlantRepository:
         import os
         
         valid_ids = {i for i in kept_ids if i is not None}
-        protected_ids: set[int] = set()
-        for row in self.database.fetchall(
-            "SELECT DISTINCT image_id FROM analysis_results WHERE plant_id = ? AND image_id IS NOT NULL",
-            (plant_id,),
-        ):
-            protected_ids.add(int(row["image_id"]))
-        for row in self.database.fetchall(
-            "SELECT DISTINCT image_id FROM camera_captures WHERE plant_id = ? AND image_id IS NOT NULL",
-            (plant_id,),
-        ):
-            protected_ids.add(int(row["image_id"]))
-        valid_ids |= protected_ids
         if not valid_ids:
             return
 
@@ -311,8 +299,105 @@ class PlantRepository:
                 except Exception:
                     pass
             
-            # DB에서 삭제 (참조 무결성을 해치지 않는 범위에서만 제거)
+            analysis_rows = self.database.fetchall(
+                "SELECT id FROM analysis_results WHERE image_id = ?",
+                (img_id,),
+            )
+            analysis_ids = [int(row["id"]) for row in analysis_rows]
+
+            capture_rows = self.database.fetchall(
+                "SELECT id FROM camera_captures WHERE image_id = ?",
+                (img_id,),
+            )
+            capture_ids = [int(row["id"]) for row in capture_rows]
+
+            alert_ids: list[int] = []
+            alert_params: list[int] = []
+            alert_conditions: list[str] = []
+            if analysis_ids:
+                alert_conditions.append(
+                    "analysis_id IN ({})".format(", ".join(["?"] * len(analysis_ids)))
+                )
+                alert_params.extend(analysis_ids)
+            if capture_ids:
+                alert_conditions.append(
+                    "camera_capture_id IN ({})".format(", ".join(["?"] * len(capture_ids)))
+                )
+                alert_params.extend(capture_ids)
+            if alert_conditions:
+                alert_rows = self.database.fetchall(
+                    f"SELECT id FROM ai_alerts WHERE {' OR '.join(alert_conditions)}",
+                    tuple(alert_params),
+                )
+                alert_ids = [int(row["id"]) for row in alert_rows]
+                if alert_ids:
+                    placeholders = ", ".join(["?"] * len(alert_ids))
+                    self.database.execute(
+                        f"DELETE FROM alert_actions WHERE alert_id IN ({placeholders})",
+                        tuple(alert_ids),
+                    )
+                    self.database.execute(
+                        f"DELETE FROM ai_alerts WHERE id IN ({placeholders})",
+                        tuple(alert_ids),
+                    )
+
+            if analysis_ids:
+                state = self.get_latest_state(plant_id)
+                if state and state.get("latest_analysis_id") in analysis_ids:
+                    self.update_latest_state(
+                        plant_id,
+                        latest_analysis_id=None,
+                        latest_health_status=None,
+                        latest_health_score=0,
+                        latest_condition_summary=None,
+                        latest_advice=None,
+                        latest_watering_need=None,
+                        latest_confidence=None,
+                        ai_updated_at=None,
+                        ai_confirmed_at=None,
+                    )
+                placeholders = ", ".join(["?"] * len(analysis_ids))
+                self.database.execute(
+                    f"DELETE FROM analysis_results WHERE id IN ({placeholders})",
+                    tuple(analysis_ids),
+                )
+
+            if capture_ids:
+                placeholders = ", ".join(["?"] * len(capture_ids))
+                self.database.execute(
+                    f"DELETE FROM camera_captures WHERE id IN ({placeholders})",
+                    tuple(capture_ids),
+                )
+
+            # DB에서 삭제 (강제 정리: 3장 프로토콜 유지)
             self.database.execute("DELETE FROM uploaded_images WHERE id = ?", (img_id,))
+
+        # 업로드 디렉토리의 DB 미연동 이미지 정리 (프로토콜 외 파일 제거)
+        sample_row = self.database.fetchone(
+            "SELECT file_path FROM uploaded_images WHERE file_path IS NOT NULL LIMIT 1"
+        )
+        if sample_row and sample_row.get("file_path"):
+            uploads_dir = Path(sample_row["file_path"]).parent
+            if uploads_dir.exists():
+                known_rows = self.database.fetchall(
+                    "SELECT file_path FROM uploaded_images WHERE file_path IS NOT NULL"
+                )
+                known_paths = {
+                    Path(row["file_path"]).resolve()
+                    for row in known_rows
+                    if row.get("file_path")
+                }
+                for file_path in uploads_dir.iterdir():
+                    if not file_path.is_file():
+                        continue
+                    if file_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
+                        continue
+                    if file_path.resolve() in known_paths:
+                        continue
+                    try:
+                        file_path.unlink()
+                    except Exception:
+                        pass
 
     def get_uploaded_image(self, image_id: int) -> dict[str, Any] | None:
         row = self.database.fetchone("SELECT * FROM uploaded_images WHERE id = ?", (image_id,))
@@ -398,7 +483,6 @@ class PlantRepository:
         self,
         plant_id: int,
         moisture_value: float,
-        humidity: float | None,
         temperature: float | None,
         light_level: float | None,
         source: str,
@@ -408,10 +492,10 @@ class PlantRepository:
         cursor = self.database.execute(
             """
             INSERT INTO sensor_logs
-            (plant_id, moisture_value, humidity, temperature, light_level, source, received_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (plant_id, moisture_value, temperature, light_level, source, received_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (plant_id, moisture_value, humidity, temperature, light_level, source, received_at),
+            (plant_id, moisture_value, temperature, light_level, source, received_at),
         )
         log_id = cursor.lastrowid
         # 최신 센서 상태 테이블 업데이트
@@ -419,7 +503,7 @@ class PlantRepository:
             """
             INSERT INTO latest_sensor_state
             (plant_id, latest_sensor_log_id, moisture_value, humidity, temperature, light_level, source, received_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)
             ON CONFLICT(plant_id) DO UPDATE SET
                 latest_sensor_log_id = excluded.latest_sensor_log_id,
                 moisture_value = excluded.moisture_value,
@@ -434,7 +518,6 @@ class PlantRepository:
                 plant_id,
                 log_id,
                 moisture_value,
-                humidity,
                 temperature,
                 light_level,
                 source,

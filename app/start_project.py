@@ -57,6 +57,7 @@ def main() -> None:
 
     dashboard_script = str((PROJECT_ROOT / "app" / "dashboard.py").resolve())
     local_ai_script = str((PROJECT_ROOT / "app" / "local_AI.py").resolve())
+    serial_listener_script = str((PROJECT_ROOT / "app" / "serial_listener.py").resolve())
 
     # 2. 대시보드 (Streamlit) 실행
     dashboard_process = subprocess.Popen(
@@ -80,11 +81,22 @@ def main() -> None:
         env=env,
         **popen_kwargs
     )
+    
+    # 4. 시리얼 리스너 실행 (SERIAL_PORT가 설정된 경우)
+    serial_process = None
+    if env.get("SERIAL_PORT"):
+        serial_process = subprocess.Popen(
+            [python_executable, serial_listener_script],
+            env=env,
+            **popen_kwargs
+        )
 
     # 실행 중인 서버들의 주소를 출력합니다.
     print(f"API: {settings.api_base_url}/api/health")
     print(f"Dashboard: http://{settings.dashboard_host}:{settings.dashboard_port}")
     print("Local AI: Background camera service started (10-min interval)")
+    if serial_process:
+        print("Serial Listener: Arduino JSON listener started")
     print("중지하려면 Ctrl+C 를 누르세요.")
 
     try:
@@ -102,7 +114,10 @@ def main() -> None:
         pass
     finally:
         # OS별 하위 프로세스 트리 완벽 종료 로직 (윈도우 & 라즈베리파이/리눅스 호환)
-        for process in (local_ai_process, dashboard_process, api_process):
+        processes = [local_ai_process, dashboard_process, api_process]
+        if serial_process:
+            processes.insert(0, serial_process)
+        for process in processes:
             if process.poll() is None:
                 try:
                     if os.name == 'nt':
@@ -118,7 +133,7 @@ def main() -> None:
                     process.terminate()
         
         # 프로세스들이 완전히 죽을 때까지 잠시 대기
-        for process in (local_ai_process, dashboard_process, api_process):
+        for process in processes:
             try:
                 process.wait(timeout=3)
             except subprocess.TimeoutExpired:

@@ -56,9 +56,7 @@ def test_full_photo_analysis_flow(tmp_path: Path) -> None:
             f"/api/plants/{plant_id}/sensor-logs",
             json={
                 "moisture_value": 31.5,
-                "humidity": 42.0,
                 "temperature": 25.0,
-                "light_level": 5300.0,
                 "source": "integration-test",
             },
         )
@@ -111,9 +109,7 @@ def test_external_sensor_and_activation_endpoints(tmp_path: Path) -> None:
             json={
                 "plant_id": first["id"],
                 "moisture_value": 44.0,
-                "humidity": 48.0,
                 "temperature": 22.2,
-                "light_level": 6100.0,
                 "source": "raspberry-pi",
             },
         )
@@ -133,7 +129,7 @@ def test_kiosk_ui_state_and_alert_confirmation(tmp_path: Path) -> None:
         assert kiosk_response.status_code == 200
         assert "시작하기" in kiosk_response.text
 
-        static_response = client.get("/static/kiosk.js")
+        static_response = client.get("/static/kiosk_v4.js")
         assert static_response.status_code == 200
         assert "/api/kiosk/state" in static_response.text
 
@@ -150,9 +146,7 @@ def test_kiosk_ui_state_and_alert_confirmation(tmp_path: Path) -> None:
             f"/api/plants/{plant_id}/sensor-logs",
             json={
                 "moisture_value": 20.0,
-                "humidity": 38.0,
                 "temperature": 27.0,
-                "light_level": 4200.0,
                 "source": "kiosk-test",
             },
         )

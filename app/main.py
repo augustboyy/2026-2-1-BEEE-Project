@@ -17,7 +17,14 @@ from fastapi.staticfiles import StaticFiles
 
 from app.bootstrap import build_runtime
 from app.config import Settings, load_settings
-from app.schemas import PlantActivationRequest, PlantCreateRequest, SensorLogRequest, WateringLogRequest
+from app.schemas import (
+    PlantActivationRequest,
+    PlantCreateRequest,
+    QuestionRequest,
+    SensorLogRequest,
+    WateringLogRequest,
+    WateringSignalRequest,
+)
 
 
 # 앱 관련 디렉토리 경로 설정
@@ -179,27 +186,44 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
     @app.post("/api/plants")
     async def create_plant(payload: PlantCreateRequest) -> dict:
         """새로운 식물을 등록하고 초기 분석을 위해 사진을 자동 촬영합니다."""
-        from app.services.camera import capture_photo
+        from app.services.camera import capture_photo_to_disk
         import datetime
+        import os
         
         plant_dict = runtime.monitoring_service.create_plant(payload.name, payload.species, payload.location)
         plant_id = plant_dict["plant"]["id"]
         
         try:
-            # 1. 초기 상태 설정을 위한 카메라 촬영
-            image_bytes = capture_photo()
+            # 1. 초기 상태 설정을 위한 고해상도 카메라 촬영 및 원본 저장
             now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
             file_name = f"initial_capture_{now_str}.jpg"
+            file_path = str(Path(runtime.settings.uploads_dir) / file_name)
+            capture_photo_to_disk(file_path)
             
             # 2. AI 분석 요청 (이 과정에서 사진이 저장되고 AI 평가 결과가 DB에 기록됨)
+            # 여기서는 파일 경로를 명시하고, 바이트는 넘기지 않음
+            with open(file_path, "rb") as f:
+                file_bytes = f.read()
+
             await runtime.monitoring_service.analyze_uploaded_photo(
                 plant_id=plant_id,
                 file_name=file_name,
-                file_bytes=image_bytes,
+                file_bytes=file_bytes, # API 하위 호환성을 위해 바이트를 넘김
                 content_type="image/jpeg",
                 note="[초기 등록] 식물이 시스템에 새로 등록되어 자동 촬영되었습니다.",
-                save_image=False
+                save_image=False # 초기 캡처 파일은 별도로 저장 관리할 수 있으나, 이미 디스크에 있으므로 False, 또는 True로 하되 file_bytes를 씀.
             )
+            
+            # 초기 사진이므로 DB에 업로드된 사진으로 등록해줌
+            # analyze_uploaded_photo가 save_image=False이면 DB에 저장을 안함. 그래서 수동 저장.
+            new_image = runtime.repository.save_uploaded_image(
+                plant_id=plant_id,
+                file_path=file_path,
+                original_name=file_name,
+                mime_type="image/jpeg"
+            )
+            runtime.repository.update_latest_state(plant_id, latest_image_id=new_image["id"])
+            
             # 분석이 완료된 후의 최신 대시보드 데이터로 갱신
             dashboard = runtime.repository.build_dashboard(plant_id)
         except Exception as e:
@@ -252,6 +276,24 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
             "dashboard": runtime.repository.build_dashboard(payload.plant_id),
         }
 
+    @app.post("/api/external/watering-signal")
+    async def receive_watering_signal(payload: WateringSignalRequest) -> dict:
+        """외부 장치로부터 급수 신호를 수신합니다."""
+        try:
+            log = runtime.monitoring_service.log_watering_signal(
+                payload.plant_id,
+                payload.signal,
+                payload.source,
+            )
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {
+            "watering_log": log,
+            "dashboard": runtime.repository.build_dashboard(log["plant_id"]),
+        }
+
     @app.post("/api/plants/{plant_id}/watering-logs")
     async def add_watering_log(plant_id: int, payload: WateringLogRequest) -> dict:
         """급수 기록을 추가합니다."""
@@ -302,6 +344,20 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         if dashboard_payload is None:
             raise HTTPException(status_code=404, detail="분석 결과를 찾을 수 없습니다.")
         return {"dashboard": dashboard_payload}
+
+    @app.post("/api/plants/{plant_id}/ask-question")
+    async def ask_question(plant_id: int, payload: QuestionRequest) -> dict:
+        """사용자의 질문을 받고 실시간 사진을 촬영해 AI에게 질의응답을 요청합니다."""
+        try:
+            record = await runtime.monitoring_service.ask_question_with_camera(plant_id, payload.question)
+            return {
+                "question_record": record,
+                "dashboard": runtime.repository.build_dashboard(plant_id)
+            }
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except Exception as error:
+            raise HTTPException(status_code=500, detail=str(error)) from error
 
     return app
 

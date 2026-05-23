@@ -188,17 +188,23 @@ function renderMain(payload) {
   setText("plant-title", plant.name || "등록된 식물");
   setText("plant-subtitle", `${species} · 최근 센서 ${formatTime(sensor.received_at || sensor.updated_at)}`);
   setText("health-label", kiosk.health_label || resolveHealthLabel(kiosk.health_status));
+  const score = kiosk.health_score ?? 0;
   setText("health-score", kiosk.health_score ?? "--");
+  const gaugeEl = $("health-gauge");
+  if (gaugeEl) {
+    gaugeEl.style.setProperty("--value", score);
+  }
 
   const statusBadge = $("health-label");
   statusBadge.className = "status-badge";
   if (kiosk.health_status === "warning") statusBadge.classList.add("warning");
   if (kiosk.health_status === "critical") statusBadge.classList.add("critical");
 
-  $("score-fill").style.width = `${Math.max(0, Math.min(100, Number(kiosk.health_score) || 0))}%`;
+  const rawScore = Number(kiosk.health_score);
+  const clampedScore = Number.isFinite(rawScore) ? Math.max(0, Math.min(100, rawScore)) : 0;
+  
   setText("sensor-moisture", formatNumber(sensor.moisture_value, "%"));
   setText("sensor-temperature", formatNumber(sensor.temperature, "°C"));
-  setText("sensor-humidity", formatNumber(sensor.humidity, "%"));
   
   const watering = dashboard.latest_watering_log;
   if (watering && watering.created_at) {
@@ -289,18 +295,22 @@ function openQuestionModal() {
 function closeQuestionModal() {
   $("question-modal").classList.add("hidden");
   $("question-input").value = "";
-  $("answer-box").textContent = "질문을 입력하면 데모 답변을 보여드립니다.";
+  $("answer-box").classList.add("hidden");
+  $("answer-box").textContent = "";
 }
 
 async function requestPlantQuestionAnswer(question) {
-  await sleep(350);
-  const sensor = state.payload?.dashboard?.latest_sensor_state || {};
-  const moisture = sensor.moisture_value;
-  const moistureLine =
-    moisture === null || moisture === undefined
-      ? "현재 센서값이 없어 최근 사진 분석 결과를 기준으로 판단해야 합니다."
-      : `현재 토양 수분은 ${formatNumber(moisture, "%")}입니다.`;
-  return `${moistureLine} 질문 답변 API는 준비 중이며, 지금은 데모 안내만 표시합니다.`;
+  const plantId = state.payload?.dashboard?.plant?.id;
+  if (!plantId) {
+    throw new Error("활성화된 식물이 없습니다.");
+  }
+  
+  const response = await apiRequest(`/api/plants/${plantId}/ask-question`, {
+    method: "POST",
+    body: JSON.stringify({ question })
+  });
+  
+  return response.question_record.answer_text;
 }
 
 async function submitQuestion() {
@@ -310,9 +320,21 @@ async function submitQuestion() {
     return;
   }
 
-  $("answer-box").textContent = "답변 준비 중...";
-  const answer = await requestPlantQuestionAnswer(question);
-  $("answer-box").textContent = answer;
+  const answerBox = $("answer-box");
+  const button = $("ask-question-button");
+  
+  answerBox.classList.remove("hidden");
+  answerBox.textContent = "📸 사진 촬영 및 AI 분석 요청 중... 잠시만 기다려주세요.";
+  button.disabled = true;
+
+  try {
+    const answer = await requestPlantQuestionAnswer(question);
+    answerBox.textContent = answer;
+  } catch (error) {
+    answerBox.textContent = `질문 처리 중 오류 발생: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function updateStartState() {
@@ -347,7 +369,28 @@ function wireEvents() {
   });
 }
 
+function startPolling() {
+  setInterval(async () => {
+    // 모달이 열려있거나 로딩 중일 때는 업데이트를 건너뜁니다.
+    if (!$("main-view").classList.contains("is-active") || 
+        !$("question-modal").classList.contains("hidden") || 
+        $("loading-view").classList.contains("is-active")) {
+      return;
+    }
+    
+    try {
+      const payload = await loadKioskState();
+      if (payload && payload.dashboard) {
+        renderMain(payload);
+      }
+    } catch (error) {
+      // 폴링 에러는 사용자 경험을 해치지 않도록 조용히 넘깁니다.
+    }
+  }, 10000); // 10초마다 자동 갱신
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   wireEvents();
   updateStartState();
+  startPolling(); // 폴링 시작
 });

@@ -437,12 +437,18 @@ class Database:
     def fetchone(self, query: str, params: tuple = ()) -> sqlite3.Row | None:
         """쿼리 실행 결과 중 첫 번째 행을 반환합니다."""
         with self._lock:
-            return self._connection.execute(query, params).fetchone()
+            result = self._connection.execute(query, params).fetchone()
+            if self._transaction_depth == 0:
+                self._connection.commit()
+            return result
 
     def fetchall(self, query: str, params: tuple = ()) -> list[sqlite3.Row]:
         """쿼리 실행 결과의 모든 행을 반환합니다."""
         with self._lock:
-            return self._connection.execute(query, params).fetchall()
+            result = self._connection.execute(query, params).fetchall()
+            if self._transaction_depth == 0:
+                self._connection.commit()
+            return result
 
     def close(self) -> None:
         """데이터베이스 연결을 닫습니다."""

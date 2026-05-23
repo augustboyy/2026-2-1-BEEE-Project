@@ -5,7 +5,7 @@ Pydantic을 사용하여 데이터의 형식을 검증하고 유효성을 체크
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class PlantCreateRequest(BaseModel):
@@ -17,9 +17,14 @@ class PlantCreateRequest(BaseModel):
 
 class SensorLogRequest(BaseModel):
     """센서 데이터 전송 요청을 위한 모델입니다."""
+    model_config = ConfigDict(populate_by_name=True)
     plant_id: int | None = None  # 식물 ID (선택)
-    moisture_value: float = Field(..., ge=0, le=100)  # 토양 수분 (0~100%)
-    humidity: float | None = Field(default=None, ge=0, le=100)  # 습도 (0~100%)
+    moisture_value: float = Field(
+        ...,
+        ge=0,
+        le=100,
+        validation_alias=AliasChoices("moisture_value", "humidity"),
+    )  # 토양 습도 (0~100%)
     temperature: float | None = Field(default=None, ge=-20, le=60)  # 온도 (-20~60°C)
     source: str = Field(default="external-device", max_length=60)  # 데이터 출처
 
@@ -34,6 +39,18 @@ class WateringLogRequest(BaseModel):
     note: str | None = Field(default=None, max_length=300)  # 추가 메모
 
 
+class WateringSignalRequest(BaseModel):
+    """급수 신호 전송 요청을 위한 모델입니다."""
+    plant_id: int | None = None  # 식물 ID (선택)
+    signal: str = Field(..., min_length=1, max_length=50)  # 급수 신호 문자열
+    source: str = Field(default="external-device", max_length=60)  # 신호 출처
+
+
 class PlantActivationRequest(BaseModel):
     """식물 활성화 요청을 위한 모델입니다."""
     plant_id: int  # 활성화할 식물의 ID
+
+
+class QuestionRequest(BaseModel):
+    """식물에 대한 질문 요청을 위한 모델입니다."""
+    question: str = Field(..., min_length=1, max_length=500)  # 질문 내용

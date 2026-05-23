@@ -332,7 +332,7 @@ textarea:focus {
 
 .status-board {
   display: grid;
-  grid-template-columns: minmax(220px, 0.75fr) minmax(420px, 1.25fr);
+  grid-template-columns: minmax(280px, 1.2fr) minmax(360px, 0.8fr);
   gap: 16px;
   margin-top: 16px;
 }
@@ -345,15 +345,19 @@ textarea:focus {
   background: var(--panel);
 }
 
-.health-panel {
-  display: grid;
-  align-content: center;
-  min-height: 230px;
-  padding: 22px;
-}
+.health-panel { display: flex; justify-content: space-evenly; align-items: center; min-height: 380px; padding: 24px 48px; gap: 40px; flex-wrap: wrap; }
+
+
+
+
+
+
+
+
+
+
 
 .status-badge {
-  justify-self: start;
   border-radius: 999px;
   padding: 8px 14px;
   background: var(--panel-soft);
@@ -372,62 +376,203 @@ textarea:focus {
   color: #761d18;
 }
 
-.score-row {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* 뉴모피즘 게이지 CSS */
+
+.health-info-side {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-top: 14px;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
 }
 
-.score-row strong {
-  font-size: clamp(52px, 7vw, 82px);
-  line-height: 1;
-  font-weight: 900;
-}
-
-.score-row span {
+.health-title-side {
+  font-size: 28px;
   color: var(--muted);
-  font-size: clamp(20px, 2.3vw, 28px);
   font-weight: 800;
 }
 
-.score-track {
-  height: 14px;
-  margin-top: 18px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #dbe5dc;
+.health-score-side {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
-.score-track span {
-  display: block;
-  width: 0%;
-  height: 100%;
-  background: var(--green);
-  transition: width 220ms ease;
+.health-score-side strong {
+  font-size: 86px;
+  font-weight: 900;
+  color: var(--ink);
+  line-height: 1;
+  letter-spacing: -2px;
 }
+
+.health-score-side span {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.gauge-card {
+  position: relative;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: 12px 12px 24px var(--line),
+              -12px -12px 24px #ffffff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  
+}
+
+.gauge-card::before {
+  content: '';
+  position: absolute;
+  width: 270px;
+  height: 270px;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: inset 8px 8px 16px var(--line),
+              inset -8px -8px 16px #ffffff;
+}
+
+.gauge-arc {
+  position: absolute;
+  width: 250px;
+  height: 250px;
+  border-radius: 50%;
+  background: conic-gradient(from 225deg, #ef4444 0%, #ef4444 22.5%, #f97316 22.5%, #f97316 45%, #22c55e 45%, #22c55e 75%, transparent 75%);
+  -webkit-mask: radial-gradient(circle, transparent 78%, black 79%);
+  mask: radial-gradient(circle, transparent 78%, black 79%);
+}
+
+.ticks {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+
+.tick {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--muted);
+  transform:
+    translate(-50%, -50%)
+    rotate(calc(-135deg + (var(--val) * 2.7deg)))
+    translateY(-105px)
+    rotate(calc(135deg - (var(--val) * 2.7deg)));
+}
+
+.needle-wrapper {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  transform: rotate(calc(-135deg + (var(--value) * 2.7deg)));
+  transition: transform 1s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.needle {
+  position: absolute;
+  bottom: 50%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 8px;
+  height: 85px;
+  background: var(--blue);
+  border-radius: 4px 4px 0 0;
+  box-shadow: 2px 0px 4px rgba(0,0,0,0.15);
+}
+
+.needle-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 32px;
+  background: var(--blue);
+  border-radius: 50%;
+  box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.needle-center::after {
+  content: '';
+  width: 14px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+}
+
+
+
+
+
+
 
 .sensor-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
 .sensor-cell {
-  display: grid;
-  align-content: center;
-  min-height: 230px;
-  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 180px;
+  padding: 16px 12px 12px;
+  position: relative;
+  text-align: center;
 }
 
 .sensor-cell span {
+  position: absolute;
+  top: 12px;
+  left: 0;
+  width: 100%;
+  text-align: center;
   color: var(--muted);
   font-size: clamp(15px, 1.7vw, 19px);
   font-weight: 800;
 }
 
 .sensor-cell strong {
-  margin-top: 16px;
+  margin-top: 0;
   font-size: clamp(30px, 4vw, 48px);
   line-height: 1.05;
   font-weight: 900;
@@ -594,7 +739,154 @@ textarea:focus {
     min-height: 138px;
   }
 
-  .sensor-grid {
+  
+
+  
+
+  
+
+  
+/* 뉴모피즘 게이지 CSS */
+
+.health-info-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+}
+
+.health-title-side {
+  font-size: 28px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.health-score-side {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.health-score-side strong {
+  font-size: 86px;
+  font-weight: 900;
+  color: var(--ink);
+  line-height: 1;
+  letter-spacing: -2px;
+}
+
+.health-score-side span {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.gauge-card {
+  position: relative;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: 12px 12px 24px var(--line),
+              -12px -12px 24px #ffffff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  
+}
+
+.gauge-card::before {
+  content: '';
+  position: absolute;
+  width: 270px;
+  height: 270px;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: inset 8px 8px 16px var(--line),
+              inset -8px -8px 16px #ffffff;
+}
+
+.gauge-arc {
+  position: absolute;
+  width: 250px;
+  height: 250px;
+  border-radius: 50%;
+  background: conic-gradient(from 225deg, #ef4444 0%, #ef4444 22.5%, #f97316 22.5%, #f97316 45%, #22c55e 45%, #22c55e 75%, transparent 75%);
+  -webkit-mask: radial-gradient(circle, transparent 78%, black 79%);
+  mask: radial-gradient(circle, transparent 78%, black 79%);
+}
+
+.ticks {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+
+.tick {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--muted);
+  transform:
+    translate(-50%, -50%)
+    rotate(calc(-135deg + (var(--val) * 2.7deg)))
+    translateY(-105px)
+    rotate(calc(135deg - (var(--val) * 2.7deg)));
+}
+
+.needle-wrapper {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  transform: rotate(calc(-135deg + (var(--value) * 2.7deg)));
+  transition: transform 1s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.needle {
+  position: absolute;
+  bottom: 50%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 8px;
+  height: 85px;
+  background: var(--blue);
+  border-radius: 4px 4px 0 0;
+  box-shadow: 2px 0px 4px rgba(0,0,0,0.15);
+}
+
+.needle-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 32px;
+  background: var(--blue);
+  border-radius: 50%;
+  box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.needle-center::after {
+  content: '';
+  width: 14px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+}
+
+
+
+
+
+
+
+.sensor-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -605,7 +897,148 @@ textarea:focus {
 }
 
 @media (max-width: 520px) {
-  .sensor-grid {
+  
+/* 뉴모피즘 게이지 CSS */
+
+.health-info-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+}
+
+.health-title-side {
+  font-size: 28px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.health-score-side {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.health-score-side strong {
+  font-size: 86px;
+  font-weight: 900;
+  color: var(--ink);
+  line-height: 1;
+  letter-spacing: -2px;
+}
+
+.health-score-side span {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.gauge-card {
+  position: relative;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: 12px 12px 24px var(--line),
+              -12px -12px 24px #ffffff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  
+}
+
+.gauge-card::before {
+  content: '';
+  position: absolute;
+  width: 270px;
+  height: 270px;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: inset 8px 8px 16px var(--line),
+              inset -8px -8px 16px #ffffff;
+}
+
+.gauge-arc {
+  position: absolute;
+  width: 250px;
+  height: 250px;
+  border-radius: 50%;
+  background: conic-gradient(from 225deg, #ef4444 0%, #ef4444 22.5%, #f97316 22.5%, #f97316 45%, #22c55e 45%, #22c55e 75%, transparent 75%);
+  -webkit-mask: radial-gradient(circle, transparent 78%, black 79%);
+  mask: radial-gradient(circle, transparent 78%, black 79%);
+}
+
+.ticks {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+
+.tick {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--muted);
+  transform:
+    translate(-50%, -50%)
+    rotate(calc(-135deg + (var(--val) * 2.7deg)))
+    translateY(-105px)
+    rotate(calc(135deg - (var(--val) * 2.7deg)));
+}
+
+.needle-wrapper {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  transform: rotate(calc(-135deg + (var(--value) * 2.7deg)));
+  transition: transform 1s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.needle {
+  position: absolute;
+  bottom: 50%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 8px;
+  height: 85px;
+  background: var(--blue);
+  border-radius: 4px 4px 0 0;
+  box-shadow: 2px 0px 4px rgba(0,0,0,0.15);
+}
+
+.needle-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 32px;
+  background: var(--blue);
+  border-radius: 50%;
+  box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.needle-center::after {
+  content: '';
+  width: 14px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+}
+
+
+
+
+
+
+
+.sensor-grid {
     grid-template-columns: 1fr;
   }
 
@@ -628,3 +1061,4 @@ textarea:focus {
     transition-duration: 1ms !important;
   }
 }
+
