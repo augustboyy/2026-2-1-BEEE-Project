@@ -9,54 +9,38 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-# 프로젝트 루트 경로를 sys.path에 추가하여 'app' 패키지를 임포트할 수 있게 합니다.
+# 프로젝트 루트 경로를 sys.path에 추가
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.bootstrap import build_runtime
+from app.services.camera import capture_photo_to_disk, create_preprocessed_temp
 
-
-# =================================================================
-# [알고리즘 기준치 설정] - 여기서 자유롭게 수정 가능합니다.
-# =================================================================
+# [알고리즘 기준치 설정]
 THRESHOLDS = {
-    # 1. 황화 현상 (Chlorosis) 기준
-    "yellow_ratio_threshold": 0.15,  # 잎 전체 면적 대비 노란색 영역 비율 (15% 이상이면 감지)
-    
-    # 2. 단기 이벤트 (이전 사진 대비)
-    "short_leaf_drop_limit": -1,     # 잎의 개수 변화 (1개 이상 줄어들면 이상 감지)
-    "short_wilt_height_ratio": 0.90, # 직전 대비 높이가 90% 이하로 줄어들면 시듦으로 판단
-    
-    # 3. 장기 성장 및 누적 상태 (아침 9시 대비)
-    "long_growth_ratio": 1.05,       # 아침 대비 높이가 105% 이상이면 성장으로 판단
-    "long_wilt_height_ratio": 0.85,  # 아침 대비 높이가 85% 이하로 줄어들면 심각한 시듦으로 판단
+    "yellow_ratio_threshold": 0.15,     # 노란색 영역 15% 이상 시 황화 현상으로 판단
+    "short_leaf_drop_limit": -1,        # 잎 개수가 1개 이상 줄어들면 이상 감지
+    "short_wilt_height_ratio": 0.90,    # 직전 대비 높이 90% 미만 시 단기 시듦
+    "long_wilt_height_ratio": 0.85,     # 오늘 아침 대비 높이 85% 미만 시 누적 시듦
 }
-# =================================================================
-
 
 class LocalAnalyzer:
     """YOLOv8 및 OpenCV를 이용한 로컬 영상 분석 클래스"""
-    
     _model = None
-    
-	# 차후 onnx파일로 변경 후 onnx포멧 맞게 yolo모델 실행하는 코드 재작성 (전처리, 후처리 모두 포함) 필요
 
     @classmethod
     def get_model(cls):
-        """YOLO 모델을 싱글톤 방식으로 로드합니다."""
         if cls._model is None:
-            # 프로젝트 루트 하위 weights 폴더에 있는 best.pt 경로 설정
             model_path = PROJECT_ROOT / "weights" / "best.pt"
             if not model_path.exists():
-                print(f"[Warning] YOLO model not found at {model_path}. Using base yolov8n.pt as fallback.")
+                print(f"[Warning] YOLO model not found at {model_path}. Using base yolov8n.pt.")
                 model_path = Path("yolov8n.pt")
             cls._model = YOLO(str(model_path))
         return cls._model
 
     @classmethod
     def get_plant_metrics(cls, image_bytes: bytes):
-        """YOLOv8 모델을 사용하여 이미지에서 잎의 개수, 높이, 황화 비율을 계산합니다."""
         import gc
         try:
             import torch
@@ -69,9 +53,7 @@ class LocalAnalyzer:
         if img is None:
             return None
         
-        # 1. YOLOv8을 사용한 잎 감지
         model = cls.get_model()
-        # 스트리밍 모드나 메모리 절약을 위해 필요한 옵션 설정
         results = model.predict(img, conf=0.25, verbose=False)
         
         leaf_count = 0
@@ -81,234 +63,113 @@ class LocalAnalyzer:
         if results and len(results[0].boxes) > 0:
             boxes = results[0].boxes
             leaf_count = len(boxes)
-            
-            # 모든 바운딩 박스를 좌표를 추출 (CPU로 이동하여 메모리 점유 최소화)
             all_boxes = boxes.xyxy.cpu().numpy()
-            
-            # [이파리가 여러개일 때의 처리]
-            # 1. 높이: 가장 위에 있는 잎의 상단부터 가장 아래에 있는 잎의 하단까지의 길이를 전체 높이로 계산
             y1_min = np.min(all_boxes[:, 1])
             y2_max = np.max(all_boxes[:, 3])
             max_height = int(y2_max - y1_min)
             
-            # 2. 황화 분석 영역: 감지된 '모든' 잎의 사각형 영역을 합쳐서 마스크 생성
+            # YOLO가 감지한 잎 사각형 영역만 마스킹 (배경 노이즈 제거)
             for box in all_boxes:
                 bx1, by1, bx2, by2 = map(int, box)
                 cv2.rectangle(leaf_mask, (bx1, by1), (bx2, by2), 255, -1)
         
-        # 2. 황화 현상 (Chlorosis) 분석
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        # 초록색/노란색 범위 필터링 (잎 영역 내부에서만)
+        lower_green = np.array([35, 40, 40]); upper_green = np.array([85, 255, 255])
+        green_mask = cv2.bitwise_and(cv2.inRange(hsv, lower_green, upper_green), leaf_mask)
+        lower_yellow = np.array([20, 100, 100]); upper_yellow = np.array([32, 255, 255])
+        yellow_mask = cv2.bitwise_and(cv2.inRange(hsv, lower_yellow, upper_yellow), leaf_mask)
         
-        # 초록색 영역 (정상)
-        lower_green = np.array([35, 40, 40])
-        upper_green = np.array([85, 255, 255])
-        green_mask = cv2.inRange(hsv, lower_green, upper_green)
-        green_mask = cv2.bitwise_and(green_mask, leaf_mask)
+        total_green = cv2.countNonZero(green_mask)
+        total_yellow = cv2.countNonZero(yellow_mask)
+        yellow_ratio = total_yellow / (total_green + total_yellow + 1e-6)
         
-        # 노란색 영역 (황화)
-        lower_yellow = np.array([20, 100, 100])
-        upper_yellow = np.array([32, 255, 255])
-        yellow_mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
-        yellow_mask = cv2.bitwise_and(yellow_mask, leaf_mask)
+        del img, results, green_mask, yellow_mask, leaf_mask
+        if has_torch and torch.cuda.is_available(): torch.cuda.empty_cache()
+        gc.collect()
         
-        total_green_area = cv2.countNonZero(green_mask)
-        total_yellow_area = cv2.countNonZero(yellow_mask)
-        
-        yellow_ratio = total_yellow_area / (total_green_area + total_yellow_area + 1e-6)
-        
-        # 3. [메모리 반환] 사용한 대형 객체들 명시적 삭제 및 가비지 컬렉션
-        del img
-        del results
-        del green_mask
-        del yellow_mask
-        del leaf_mask
-        
-        if has_torch and torch.cuda.is_available():
-            torch.cuda.empty_cache() # GPU 메모리 파편화 방지 및 반환
-        
-        gc.collect() # 파이썬 가비지 컬렉터 강제 실행
-        
-        return {
-            "leaf_count": leaf_count,
-            "height": max_height,
-            "yellow_ratio": yellow_ratio
-        }
-
-
-def get_current_morning_image_id(repository, plant_id: int):
-    state = repository.database.fetchone(
-        "SELECT morning_image_id FROM latest_state WHERE plant_id = ?", (plant_id,)
-    )
-    if state and state["morning_image_id"]:
-        image = repository.get_uploaded_image(state["morning_image_id"])
-        if image:
-            created_at = datetime.datetime.fromisoformat(image["created_at"].replace("Z", "+00:00"))
-            now = datetime.datetime.now(datetime.timezone.utc)
-            if created_at.date() == now.date():
-                return state["morning_image_id"]
-    return None
-
-def delete_image_from_disk_and_db(repository, image_id: int):
-    if not image_id: return
-    image = repository.get_uploaded_image(image_id)
-    if not image: return
-    
-    file_path = image.get("file_path")
-    if file_path and os.path.exists(file_path):
-        try: os.remove(file_path)
-        except: pass
-            
-    with repository.database.transaction():
-        repository.database.execute("DELETE FROM uploaded_images WHERE id = ?", (image_id,))
-        repository.database.execute("DELETE FROM camera_captures WHERE image_id = ?", (image_id,))
-
-async def trigger_cloud_ai(runtime, plant, image_path: str, note: str, image_id: int):
-    """이상이 감지되었을 때 Cloud AI(Gemini)를 호출합니다."""
-    print(f"[Trigger] Abnormality detected! Calling Cloud AI for plant: {plant['name']}")
-    try:
-        image_bytes = Path(image_path).read_bytes()
-        # 최신 센서/급수 데이터 가져오기
-        latest_sensor = runtime.repository.get_latest_sensor_state(plant["id"])
-        latest_watering = runtime.repository.get_latest_watering_log(plant["id"])
-        
-        # Cloud AI 호출 (기존 ai_client 로직 사용)
-        ai_payload = await runtime.monitoring_service.ai_client.analyze_plant_photo(
-            plant=plant,
-            image_bytes=image_bytes,
-            mime_type="image/jpeg",
-            latest_sensor=latest_sensor,
-            latest_watering=latest_watering,
-            note=f"[Local AI 자동 감지] {note}",
-        )
-        
-        analysis = runtime.repository.add_analysis_result(
-            plant_id=plant["id"],
-            job_id=str(uuid.uuid4()),
-            image_id=image_id,
-            provider=ai_payload["provider"],
-            model_name=ai_payload["model_name"],
-            request_note=f"[Local AI 자동 감지] {note}",
-            prompt_text=ai_payload["prompt_text"],
-            response_json=ai_payload["result"],
-            raw_response_text=ai_payload["raw_response_text"],
-        )
-        return analysis
-    except Exception as e:
-        print(f"[Error] Cloud AI Trigger failed: {e}")
-        return None
+        return {"leaf_count": leaf_count, "height": max_height, "yellow_ratio": yellow_ratio}
 
 async def run_local_ai_loop():
     print("Starting Local AI Analysis & Camera Service...")
     runtime = build_runtime()
     repository = runtime.repository
     analyzer = LocalAnalyzer()
-    
     uploads_dir = Path(runtime.settings.uploads_dir)
-    uploads_dir.mkdir(parents=True, exist_ok=True)
     
     while True:
         try:
             plant = repository.get_current_plant()
             if not plant:
-                print("[Local AI] No active plant found. Waiting...")
-                await asyncio.sleep(60)
-                continue
+                await asyncio.sleep(60); continue
                 
             plant_id = plant["id"]
             now = datetime.datetime.now()
             
-            # 1. 고해상도(8MP) 원본 사진 촬영 및 저장
+            # 1. 고해상도(8MP) 촬영
             file_name = f"local_ai_{now.strftime('%Y%m%d_%H%M%S')}.jpg"
-            original_file_path = uploads_dir / file_name
+            original_path = uploads_dir / file_name
+            capture_photo_to_disk(str(original_path))
             
-            from app.services.camera import capture_photo_to_disk, create_preprocessed_temp
-            capture_photo_to_disk(str(original_file_path))
-            
-            # 2. 로컬 분석(YOLO)을 위한 640px 임시 이미지 생성 (메모리 최적화)
-            temp_640_path = uploads_dir / f"temp_640_{uuid.uuid4().hex}.jpg"
-            create_preprocessed_temp(
-                original_path=str(original_file_path),
-                temp_path=str(temp_640_path),
-                max_dim=640,
-                apply_enhancement=False # OpenCV에서 대비 조절 등은 직접 할 수 있으므로 여기선 리사이즈만 수행
-            )
-            
-            # 파일에서 바이트 읽어오기 (기존 get_plant_metrics 유지)
-            with open(temp_640_path, "rb") as f:
-                image_bytes_640 = f.read()
-                
-            # 임시 파일 즉시 삭제
-            if temp_640_path.exists():
-                os.remove(temp_640_path)
-                
-            # 3. 로컬 분석 수행 (640px 버전으로 실행하여 RAM/CPU 최적화)
-            current_metrics = analyzer.get_plant_metrics(image_bytes_640)
-            
-            # 3. 이전 데이터와 비교를 위해 DB에서 현재 상태 가져오기
-            state = repository.database.fetchone("SELECT * FROM latest_state WHERE plant_id = ?", (plant_id,))
+            # 2. 현재 상태 분석 (640px 메모리 최적화)
+            temp_path = uploads_dir / f"temp_640_{uuid.uuid4().hex}.jpg"
+            create_preprocessed_temp(str(original_path), str(temp_path), max_dim=640)
+            with open(temp_path, "rb") as f: curr_metrics = analyzer.get_plant_metrics(f.read())
+            if temp_path.exists(): os.remove(temp_path)
+            if not curr_metrics: continue
+
+            # 3. 비교 데이터 준비 (직전 사진, 아침 사진)
+            state = repository.get_latest_state(plant_id)
             prev_id = state["previous_image_id"] if state else None
             morning_id = state["morning_image_id"] if state else None
             
-            # 비교용 메트릭 추출
-            def get_metrics_for_id(img_id):
+            def get_safe_metrics(img_id):
                 if not img_id: return None
                 img_data = repository.get_uploaded_image(img_id)
                 if not img_data or not os.path.exists(img_data["file_path"]): return None
-                with open(img_data["file_path"], "rb") as f:
-                    return analyzer.get_plant_metrics(f.read())
+                t_path = uploads_dir / f"temp_comp_{uuid.uuid4().hex}.jpg"
+                try:
+                    create_preprocessed_temp(img_data["file_path"], str(t_path), max_dim=640)
+                    with open(t_path, "rb") as f: return analyzer.get_plant_metrics(f.read())
+                except: return None
+                finally:
+                    if t_path.exists(): os.remove(t_path)
 
-            prev_metrics = get_metrics_for_id(prev_id)
-            morning_metrics = get_metrics_for_id(morning_id)
+            prev_metrics = get_safe_metrics(prev_id)
+            morning_metrics = get_safe_metrics(morning_id)
             
-            # 4. 이상 감지 로직
-            abnormality_note = None
+            # 4. 복합 이상 감지 로직
+            note = None
+            # (1) 황화 현상 체크
+            if curr_metrics["yellow_ratio"] > THRESHOLDS["yellow_ratio_threshold"]:
+                note = f"황화 현상({curr_metrics['yellow_ratio']:.1%})"
             
-            # (1) 황화 현상 감지
-            if current_metrics["yellow_ratio"] > THRESHOLDS["yellow_ratio_threshold"]:
-                abnormality_note = f"황화 현상 감지 (노란색 비율: {current_metrics['yellow_ratio']:.2%})"
+            # (2) 단기 변화 체크 (직전 사진 대비)
+            elif prev_metrics:
+                diff = curr_metrics["leaf_count"] - prev_metrics["leaf_count"]
+                if diff <= THRESHOLDS["short_leaf_drop_limit"]:
+                    note = f"잎 탈락({abs(diff)}개)"
+                elif curr_metrics["height"] / (prev_metrics["height"] + 1e-6) < THRESHOLDS["short_wilt_height_ratio"]:
+                    note = "시듦 감지(단기)"
             
-            # (2) 단기 이벤트 분석
-            if not abnormality_note and prev_metrics:
-                leaf_diff = current_metrics["leaf_count"] - prev_metrics["leaf_count"]
-                if leaf_diff <= THRESHOLDS["short_leaf_drop_limit"]:
-                    abnormality_note = f"단기 잎 탈락 감지 (직전 대비 {abs(leaf_diff)}개 감소)"
-                
-                height_ratio = current_metrics["height"] / (prev_metrics["height"] + 1e-6)
-                if height_ratio < THRESHOLDS["short_wilt_height_ratio"]:
-                    abnormality_note = f"단기 시듦 감지 (직전 대비 높이 {height_ratio:.1%})"
+            # (3) 장기 변화 체크 (오늘 아침 사진 대비)
+            if not note and morning_metrics:
+                if curr_metrics["height"] / (morning_metrics["height"] + 1e-6) < THRESHOLDS["long_wilt_height_ratio"]:
+                    note = "시듦 감지(누적)"
 
-            # (3) 장기 성장 및 누적 상태 분석
-            if not abnormality_note and morning_metrics:
-                long_height_ratio = current_metrics["height"] / (morning_metrics["height"] + 1e-6)
-                if long_height_ratio < THRESHOLDS["long_wilt_height_ratio"]:
-                    abnormality_note = f"누적 시듦 감지 (아침 대비 높이 {long_height_ratio:.1%})"
-                elif long_height_ratio > THRESHOLDS["long_growth_ratio"]:
-                    # 성장은 긍정적인 신호이므로 이상 감지로 분류하지 않을 수도 있지만, 
-                    # 사용자 요청에 따라 지표로 관리. 여기서는 '성장 감지'로 리포트만 하거나 패스.
-                    print(f"[Local AI] Growth detected! (Height: {long_height_ratio:.1%})")
-
-            # 5. DB 업데이트 및 사진 3장 유지
+            # 5. DB 저장 및 이상 발생 시 Gemini 즉시 호출
             with repository.database.transaction():
-                new_image = repository.save_uploaded_image(
-                    plant_id=plant_id,
-                    file_path=str(original_file_path.resolve()),
-                    original_name=file_name,
-                    mime_type="image/jpeg"
-                )
-                new_image_id = new_image["id"]
+                repository.save_uploaded_image(plant_id, str(original_path.resolve()), file_name, "image/jpeg")
             
-            # 6. 이상 감지 시 Cloud AI 호출
-            if abnormality_note:
-                await trigger_cloud_ai(runtime, plant, str(original_file_path.resolve()), abnormality_note, new_image_id)
+            if note:
+                await runtime.monitoring_service.trigger_abnormal_analysis(plant_id, f"[로컬감지] {note}")
             
-            print(f"[Local AI] Analysis complete. Abnormal: {abnormality_note is not None}. Sleeping...")
+            print(f"[Local AI] {now.strftime('%H:%M:%S')} - 분석 완료 (이상: {note is not None})")
             
         except Exception as e:
-            import traceback
-            print(f"[Error] Local AI loop failed: {e}")
-            traceback.print_exc()
+            print(f"[Error] Local AI Loop 실패: {e}")
             
-        await asyncio.sleep(600)
+        await asyncio.sleep(600) # 10분 주기
 
 if __name__ == "__main__":
     asyncio.run(run_local_ai_loop())

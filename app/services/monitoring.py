@@ -184,6 +184,73 @@ class MonitoringService:
             "dashboard": self.repository.build_dashboard(plant_id),
         }
 
+    async def trigger_abnormal_analysis(self, plant_id: int, note: str) -> dict:
+        """
+        이상이 감지되었을 때 정밀 분석(Gemini)을 수행합니다.
+        (로컬 AI 루프 또는 시뮬레이션에서 호출)
+        """
+        plant = self.repository.get_plant(plant_id)
+        if plant is None:
+            raise LookupError("식물을 찾을 수 없습니다.")
+
+        # 1. 최신 저장된 사진이 있는지 확인
+        latest_image = self.repository.get_latest_uploaded_image(plant_id)
+        
+        image_path = None
+        file_bytes = None
+        file_name = "abnormal_trigger.jpg"
+        mime_type = "image/jpeg"
+
+        if latest_image and Path(latest_image["file_path"]).exists():
+            image_path = latest_image["file_path"]
+            file_name = latest_image["original_name"]
+            mime_type = latest_image["mime_type"]
+            with open(image_path, "rb") as f:
+                file_bytes = f.read()
+        else:
+            # 사진이 없으면 실시간 촬영 시도
+            from app.services.camera import capture_photo_to_disk
+            import datetime
+            now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            file_name = f"auto_capture_{now_str}.jpg"
+            image_path = str(Path(self.settings.uploads_dir) / file_name)
+            try:
+                capture_photo_to_disk(image_path)
+                with open(image_path, "rb") as f:
+                    file_bytes = f.read()
+            except Exception as e:
+                # 카메라가 없거나 오류 시 에러 로그 기록
+                self.repository.add_error("camera", f"이상 감지 자동 촬영 실패: {e}", plant_id=plant_id)
+                raise
+
+        # 2. 분석 수행 (기존 로직 재활용)
+        # 이미 파일이 디스크에 있으므로 save_image=False로 호출 (중복 방지)
+        # 단, 새로 촬영한 경우 DB에 등록이 필요할 수 있으나 
+        # 여기서는 단순 분석 결과 추가에 집중
+        result = await self.analyze_uploaded_photo(
+            plant_id=plant_id,
+            file_name=file_name,
+            file_bytes=file_bytes,
+            content_type=mime_type,
+            note=note,
+            save_image=False 
+        )
+        
+        # 만약 새로 찍은 사진이었다면 DB에 수동으로 연결해줄 수도 있지만, 
+        # 분석 결과에 image_id가 들어가는 것이 중요함.
+        # analyze_uploaded_photo(save_image=False)는 image_id를 None으로 함.
+        # 그래서 정교하게 하려면 image_id를 찾아야 함.
+        
+        if latest_image and not result["analysis"]["image_id"]:
+            # 기존 사진을 썼다면 image_id 업데이트
+            self.repository.database.execute(
+                "UPDATE analysis_results SET image_id = ? WHERE id = ?",
+                (latest_image["id"], result["analysis"]["id"])
+            )
+            result["analysis"]["image_id"] = latest_image["id"]
+
+        return result["analysis"]
+
     def confirm_analysis(self, analysis_id: int) -> dict | None:
         """사용자가 AI 분석 결과를 확인했음을 처리합니다."""
         analysis = self.repository.confirm_analysis(analysis_id)

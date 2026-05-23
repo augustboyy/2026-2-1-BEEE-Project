@@ -376,7 +376,7 @@ class PlantRepository:
         sample_row = self.database.fetchone(
             "SELECT file_path FROM uploaded_images WHERE file_path IS NOT NULL LIMIT 1"
         )
-        if sample_row and sample_row.get("file_path"):
+        if sample_row and sample_row["file_path"]:
             uploads_dir = Path(sample_row["file_path"]).parent
             if uploads_dir.exists():
                 known_rows = self.database.fetchall(
@@ -385,7 +385,7 @@ class PlantRepository:
                 known_paths = {
                     Path(row["file_path"]).resolve()
                     for row in known_rows
-                    if row.get("file_path")
+                    if row["file_path"]
                 }
                 for file_path in uploads_dir.iterdir():
                     if not file_path.is_file():
