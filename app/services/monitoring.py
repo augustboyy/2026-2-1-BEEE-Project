@@ -218,6 +218,15 @@ class MonitoringService:
                 capture_photo_to_disk(image_path)
                 with open(image_path, "rb") as f:
                     file_bytes = f.read()
+                
+                # [수정] 새로 찍은 사진을 DB에 등록하여 3장 유지 규칙이 적용되게 함
+                new_img_record = self.repository.save_uploaded_image(
+                    plant_id=plant_id,
+                    file_path=image_path,
+                    original_name=file_name,
+                    mime_type=mime_type
+                )
+                latest_image = new_img_record # 아래 로직에서 image_id 연결을 위해 업데이트
             except Exception as e:
                 # 카메라가 없거나 오류 시 에러 로그 기록
                 self.repository.add_error("camera", f"이상 감지 자동 촬영 실패: {e}", plant_id=plant_id)
