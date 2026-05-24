@@ -411,7 +411,7 @@ class Database:
         with self._lock:
             is_outer_transaction = self._transaction_depth == 0
             if is_outer_transaction:
-                self._connection.execute("BEGIN;")
+                self._connection.execute("BEGIN IMMEDIATE;")
             self._transaction_depth += 1
             try:
                 yield

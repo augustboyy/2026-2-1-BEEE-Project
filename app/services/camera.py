@@ -4,34 +4,83 @@
 
 import cv2
 import os
+import time
 from PIL import Image, ImageEnhance
+from pathlib import Path
+
+# 파일 기반 락 (Cross-process)
+LOCK_FILE_PATH = Path("camera.lock")
+
+class FileLock:
+    def __enter__(self):
+        for _ in range(50): # 최대 5초 대기
+            try:
+                # stale lock 체크
+                if LOCK_FILE_PATH.exists():
+                    try:
+                        with open(LOCK_FILE_PATH, 'r') as f:
+                            pid = int(f.read().strip())
+                        # 프로세스가 살아있는지 확인 (os.kill(pid, 0)은 프로세스가 존재하면 아무 일도 안 함)
+                        os.kill(pid, 0)
+                    except (ValueError, OSError, ProcessLookupError):
+                        # 프로세스가 죽었거나 파일 내용이 이상하면 강제 삭제
+                        try: os.remove(LOCK_FILE_PATH)
+                        except Exception: pass
+                
+                # 'x' 모드는 파일이 존재하면 FileExistsError 발생시킴 (Atomic)
+                with open(LOCK_FILE_PATH, 'x') as f:
+                    f.write(str(os.getpid()))
+                return self
+            except FileExistsError:
+                time.sleep(0.1)
+        raise RuntimeError("카메라 락을 획득할 수 없습니다. 다른 프로세스가 오랫동안 카메라를 점유하고 있습니다.")
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            if LOCK_FILE_PATH.exists():
+                os.remove(LOCK_FILE_PATH)
+        except Exception:
+            pass
 
 def capture_photo_to_disk(file_path: str) -> None:
     """
     기본 카메라(0번)를 열어 사진을 한 장 촬영하고, 메모리를 최소화하며 디스크에 직접 저장합니다.
-    라즈베리파이의 카메라(예: 8MP) 고해상도 원본 사진을 디스크에 기록합니다.
     """
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        raise RuntimeError("카메라 장치를 열 수 없습니다. 장치가 연결되어 있는지 확인해 주세요.")
+    with FileLock():
+        cap = None
         
-    # 최대 해상도(8MP 이상)로 설정 시도
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 3264)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2448)
-        
-    for _ in range(5):
-        cap.read()
-        
-    ret, frame = cap.read()
-    cap.release()
-    
-    if not ret:
-        raise RuntimeError("카메라에서 사진을 촬영할 수 없습니다.")
-        
-    # cv2.imwrite는 인코딩 결과를 파이썬 RAM에 크게 들고 있지 않고 디스크에 직접 기록합니다.
-    success = cv2.imwrite(file_path, frame)
-    if not success:
-        raise RuntimeError("사진을 디스크에 저장할 수 없습니다.")
+        # 카메라가 OS 레벨에서 릴리즈되는 데 시간이 걸릴 수 있으므로 재시도
+        for attempt in range(3):
+            cap = cv2.VideoCapture(0)
+            if cap.isOpened():
+                break
+            cap.release()
+            print(f"[Camera] 카메라 열기 재시도 중... ({attempt + 1}/3)")
+            time.sleep(1.5)
+            
+        if not cap or not cap.isOpened():
+            raise RuntimeError("카메라 장치를 열 수 없습니다. 장치가 연결되어 있는지 확인해 주세요.")
+            
+        try:
+            # 최대 해상도(8MP 이상)로 설정 시도
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 3264)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2448)
+                
+            # 조도 조절을 위해 여러 프레임 건너뛰기
+            for _ in range(8):
+                cap.read()
+                time.sleep(0.1)
+                
+            ret, frame = cap.read()
+            if not ret:
+                raise RuntimeError("카메라에서 유효한 프레임을 읽을 수 없습니다.")
+                
+            success = cv2.imwrite(file_path, frame)
+            if not success:
+                raise RuntimeError("사진을 디스크에 저장할 수 없습니다.")
+        finally:
+            if cap:
+                cap.release()
 
 def create_preprocessed_temp(original_path: str, temp_path: str, max_dim: int, apply_enhancement: bool = False) -> None:
     """

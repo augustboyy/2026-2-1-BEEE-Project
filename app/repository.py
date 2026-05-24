@@ -240,19 +240,22 @@ class PlantRepository:
             current_morning_id = state.get("morning_image_id") if state else None
             
             # 오늘 아침 9시인지 확인하여 morning_image_id 갱신
-            now = datetime.now()
+            now_utc = datetime.now(timezone.utc)
+            # 한국 시간(KST)으로 변환하여 아침 9시를 판단 (사용자 환경이 한국임을 감안)
+            now_kst = now_utc + timedelta(hours=9)
             new_morning_id = current_morning_id
             
             # 저장된 아침 사진이 오늘 것이 아니면 None으로 간주
             if current_morning_id:
                 m_img = self.get_uploaded_image(current_morning_id)
                 if m_img:
-                    m_date = datetime.fromisoformat(m_img["created_at"].replace("Z", "+00:00")).date()
-                    if m_date != now.date():
+                    m_date_utc = datetime.fromisoformat(m_img["created_at"].replace("Z", "+00:00"))
+                    m_date_kst = m_date_utc + timedelta(hours=9)
+                    if m_date_kst.date() != now_kst.date():
                         new_morning_id = None
             
-            # 9:00~9:09 사이에 처음 찍힌 사진을 오늘 아침 사진으로 등록
-            if now.hour == 9 and 0 <= now.minute <= 9 and not new_morning_id:
+            # KST 기준 9:00~9:09 사이에 처음 찍힌 사진을 오늘 아침 사진으로 등록
+            if now_kst.hour == 9 and 0 <= now_kst.minute <= 9 and not new_morning_id:
                 new_morning_id = new_image_id
             
             # 3. 상태 업데이트 (Latest -> Previous 시프트)
@@ -390,6 +393,9 @@ class PlantRepository:
                 for file_path in uploads_dir.iterdir():
                     if not file_path.is_file():
                         continue
+                    # 임시 파일들은 삭제 대상에서 제외 (해당 스레드가 알아서 삭제함)
+                    if file_path.name.startswith("temp_") or file_path.name.startswith("upload_temp_"):
+                        continue
                     if file_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
                         continue
                     if file_path.resolve() in known_paths:
@@ -484,7 +490,6 @@ class PlantRepository:
         plant_id: int,
         moisture_value: float,
         temperature: float | None,
-        light_level: float | None,
         source: str,
     ) -> dict[str, Any]:
         """센서로부터 수신한 데이터를 로그로 저장하고 최신 상태를 갱신합니다."""
@@ -492,24 +497,22 @@ class PlantRepository:
         cursor = self.database.execute(
             """
             INSERT INTO sensor_logs
-            (plant_id, moisture_value, temperature, light_level, source, received_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (plant_id, moisture_value, temperature, source, received_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (plant_id, moisture_value, temperature, light_level, source, received_at),
+            (plant_id, moisture_value, temperature, source, received_at),
         )
         log_id = cursor.lastrowid
         # 최신 센서 상태 테이블 업데이트
         self.database.execute(
             """
             INSERT INTO latest_sensor_state
-            (plant_id, latest_sensor_log_id, moisture_value, humidity, temperature, light_level, source, received_at, updated_at)
-            VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)
+            (plant_id, latest_sensor_log_id, moisture_value, temperature, light_level, source, received_at, updated_at)
+            VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
             ON CONFLICT(plant_id) DO UPDATE SET
                 latest_sensor_log_id = excluded.latest_sensor_log_id,
                 moisture_value = excluded.moisture_value,
-                humidity = excluded.humidity,
                 temperature = excluded.temperature,
-                light_level = excluded.light_level,
                 source = excluded.source,
                 received_at = excluded.received_at,
                 updated_at = excluded.updated_at
@@ -519,7 +522,6 @@ class PlantRepository:
                 log_id,
                 moisture_value,
                 temperature,
-                light_level,
                 source,
                 received_at,
                 received_at,

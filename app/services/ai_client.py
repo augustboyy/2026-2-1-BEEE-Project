@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import json
 import re
+import os
+import uuid
+import asyncio
 from typing import Any
 from io import BytesIO
 
@@ -14,6 +17,7 @@ from google import genai
 from PIL import Image
 
 from app.config import Settings
+from app.services.camera import create_preprocessed_temp, capture_photo_to_disk
 
 
 # AI로부터 받아올 JSON 데이터의 구조(Schema)를 정의합니다.
@@ -73,38 +77,39 @@ class AIClient:
         if not self.settings.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY가 설정되지 않았습니다.")
 
-        import os
-        import uuid
-        from app.services.camera import create_preprocessed_temp
-        
         temp_1536_path = os.path.join(self.settings.uploads_dir, f"temp_1536_{uuid.uuid4().hex}.jpg")
+        raw_temp_path = None
         
         try:
             # 1. 1536px 전처리본 생성 (파일 경로가 주어졌으면 파일에서, 바이트면 바이트에서)
             if image_path and os.path.exists(image_path):
-                create_preprocessed_temp(image_path, temp_1536_path, max_dim=1536, apply_enhancement=True)
+                await asyncio.to_thread(create_preprocessed_temp, image_path, temp_1536_path, 1536, True)
             elif image_bytes:
-                # API로 수동 업로드된 경우 바이트 사용
-                with open(temp_1536_path, "wb") as f:
+                raw_temp_path = os.path.join(self.settings.uploads_dir, f"raw_temp_{uuid.uuid4().hex}.jpg")
+                with open(raw_temp_path, "wb") as f:
                     f.write(image_bytes)
-                create_preprocessed_temp(temp_1536_path, temp_1536_path, max_dim=1536, apply_enhancement=True)
+                await asyncio.to_thread(create_preprocessed_temp, raw_temp_path, temp_1536_path, 1536, True)
             else:
                 raise ValueError("image_bytes 또는 image_path 둘 중 하나는 제공되어야 합니다.")
 
-            # 2. PIL로 가볍게 열기
-            img = Image.open(temp_1536_path)
-
             prompt = self._build_prompt(plant, latest_sensor, latest_watering, note)
             
-            # Gemini 모델 호출
-            response = self.client.models.generate_content(
-                model=self.model_id,
-                contents=[prompt, img],
-                config={
-                    "temperature": 0.2,
-                    "response_mime_type": "application/json",
-                }
-            )
+            def _call_gemini():
+                img = Image.open(temp_1536_path)
+                try:
+                    return self.client.models.generate_content(
+                        model=self.model_id,
+                        contents=[prompt, img],
+                        config={
+                            "temperature": 0.2,
+                            "response_mime_type": "application/json",
+                        }
+                    )
+                finally:
+                    img.close()
+            
+            # Gemini 모델 호출 (이벤트 루프 차단 방지)
+            response = await asyncio.to_thread(_call_gemini)
             
             raw_text = response.text
             parsed_json = self._extract_json(raw_text)
@@ -119,10 +124,11 @@ class AIClient:
         except Exception as e:
             raise RuntimeError(f"Gemini API 호출 중 오류 발생: {str(e)}")
         finally:
-            if 'img' in locals():
-                img.close()
             if os.path.exists(temp_1536_path):
                 try: os.remove(temp_1536_path)
+                except: pass
+            if raw_temp_path and os.path.exists(raw_temp_path):
+                try: os.remove(raw_temp_path)
                 except: pass
 
     def _build_prompt(
@@ -208,37 +214,36 @@ class AIClient:
         """
         카메라로 실물을 촬영하고, 사진을 AI에게 보내 식물이 무엇인지 한 가지 추측값만 반환받습니다.
         """
-        from app.services.camera import capture_photo_to_disk, create_preprocessed_temp
-        import os
-        import uuid
-        
         original_path = os.path.join(self.settings.uploads_dir, f"temp_species_{uuid.uuid4().hex}.jpg")
         temp_1536_path = os.path.join(self.settings.uploads_dir, f"temp_1536_{uuid.uuid4().hex}.jpg")
         
         try:
-            # 1. 고해상도 촬영 후 디스크 저장
-            capture_photo_to_disk(original_path)
+            # 1. 고해상도 촬영 후 디스크 저장 (블로킹 방지)
+            await asyncio.to_thread(capture_photo_to_disk, original_path)
             # 2. 1536px로 리사이징
-            create_preprocessed_temp(original_path, temp_1536_path, max_dim=1536)
+            await asyncio.to_thread(create_preprocessed_temp, original_path, temp_1536_path, 1536)
             
-            # 3. 이미지 처리
-            img = Image.open(temp_1536_path) 
+            prompt = "이 식물이 무엇인지 가장 가능성 높은 식물 종(species) 학명이나 일반적인 이름 하나만 추정해주세요. 다른 설명 없이 딱 이름만 말해주세요."
             
-            prompt = "이 식물이 무엇인지 가장 가능성 높은 식물 종(species) 단 하나만 문자열로 알려줘. 다른 설명, 인사말, 구두점 없이 딱 이름만 말해."
+            def _call_gemini_id():
+                img = Image.open(temp_1536_path) 
+                try:
+                    return self.client.models.generate_content(
+                        model=self.model_id,
+                        contents=[prompt, img],
+                        config={
+                            "temperature": 0.1,
+                        }
+                    )
+                finally:
+                    img.close()
             
             # Gemini 모델 호출
-            response = self.client.models.generate_content(
-                model=self.model_id,
-                contents=[prompt, img],
-                config={
-                    "temperature": 0.1,
-                }
-            )
+            response = await asyncio.to_thread(_call_gemini_id)
             return response.text.strip()
         except Exception as e:
             raise RuntimeError(f"식물 추정 중 오류 발생: {str(e)}")
         finally:
-            if 'img' in locals(): img.close()
             if os.path.exists(temp_1536_path):
                 try: os.remove(temp_1536_path)
                 except: pass
@@ -254,15 +259,10 @@ class AIClient:
         if not self.settings.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY가 설정되지 않았습니다.")
 
-        import os
-        import uuid
-        from app.services.camera import create_preprocessed_temp
-        
         temp_1536_path = os.path.join(self.settings.uploads_dir, f"temp_1536_{uuid.uuid4().hex}.jpg")
         
         try:
-            create_preprocessed_temp(image_path, temp_1536_path, max_dim=1536, apply_enhancement=True)
-            img = Image.open(temp_1536_path)
+            await asyncio.to_thread(create_preprocessed_temp, image_path, temp_1536_path, 1536, True)
 
             prompt = (
                 f"당신은 친절하고 전문적인 20년 경력의 식물 전문가(수목의학 전문가)입니다.\n"
@@ -271,19 +271,25 @@ class AIClient:
                 f"사용자의 질문: \"{question}\"\n\n"
                 f"첨부된 사진은 지금 막 촬영된 식물의 현재 상태입니다.\n"
                 f"이 사진을 자세히 관찰하고 사용자의 질문에 대해 명확, 친절하고 도움이 되는 답변을 작성해주세요.\n"
-                f"단, 키오스크 화면에 표시되어야 하므로 **답변은 반드시 3문장 이내로 짧고 간결하게 작성**해 주세요."
+                f"단, 키오스크 화면에 표시되어야 하므로 **답변은 반드시 4문장 이내로 짧고 간결하게 작성**해 주세요."
             )
 
-            response = self.client.models.generate_content(
-                model=self.model_id,
-                contents=[prompt, img],
-                config={"temperature": 0.3}
-            )
+            def _call_gemini_qa():
+                img = Image.open(temp_1536_path)
+                try:
+                    return self.client.models.generate_content(
+                        model=self.model_id,
+                        contents=[prompt, img],
+                        config={"temperature": 0.3}
+                    )
+                finally:
+                    img.close()
+
+            response = await asyncio.to_thread(_call_gemini_qa)
             return response.text.strip()
         except Exception as e:
             raise RuntimeError(f"Gemini AI 질문 처리 중 오류 발생: {str(e)}")
         finally:
-            if 'img' in locals(): img.close()
             if os.path.exists(temp_1536_path):
                 try: os.remove(temp_1536_path)
                 except: pass

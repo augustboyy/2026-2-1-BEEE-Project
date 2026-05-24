@@ -53,11 +53,10 @@ class MonitoringService:
         if plant is None:
             raise LookupError("식물을 찾을 수 없습니다.")
         return self.repository.add_sensor_log(
-            plant_id,
-            payload.moisture_value,
-            payload.temperature,
-            None, # light_level is removed
-            payload.source,
+            plant_id=plant_id,
+            moisture_value=payload.moisture_value,
+            temperature=payload.temperature,
+            source=payload.source,
         )
 
     def log_watering(self, plant_id: int, payload: WateringLogRequest) -> dict:
@@ -97,39 +96,54 @@ class MonitoringService:
             note=f"{source}:{clean_signal}",
         )
 
-    async def analyze_uploaded_photo(
+        async def analyze_uploaded_photo(
         self,
         plant_id: int,
         file_name: str,
-        file_bytes: bytes,
+        image_path: str,
         content_type: str | None,
         note: str | None = None,
         save_image: bool = True,
     ) -> dict:
         """
         사용자가 업로드한 사진을 외부 AI에게 보내 분석하고 결과를 저장하는 핵심 비즈니스 로직입니다.
+        (메모리 부족 방지를 위해 bytes가 아닌 파일 경로 기반으로 처리)
         """
         plant = self.repository.get_plant(plant_id)
         if plant is None:
             raise LookupError("식물을 찾을 수 없습니다.")
 
-        # 1. 이미지 검증 및 저장
-        mime_type = content_type or self._detect_mime_type(file_bytes)
-        self._validate_upload(file_name, file_bytes, mime_type)
-        
-        image_path = None
+        # 1. 파일 검증 (크기 제한 확인)
+        import os
+        if os.path.getsize(image_path) > self.settings.max_upload_mb * 1024 * 1024:
+            raise ValueError(f"업로드 가능한 최대 용량은 {self.settings.max_upload_mb}MB 입니다.")
+
+        mime_type = content_type or "image/jpeg"
+
+        final_image_path = image_path
         if save_image:
-            image_path = self._store_image(file_name, file_bytes)
+            import shutil
+            # 저장용 고유 경로 생성
+            extension = Path(file_name).suffix.lower() or ".jpg"
+            safe_name = f"{uuid.uuid4().hex}{extension}"
+            target_path = Path(self.settings.uploads_dir) / safe_name
+            # 임시 파일을 안전한 저장소로 복사 (이동하면 원본 보존 불가 상황 대비)
+            shutil.copy2(image_path, target_path)
+            final_image_path = str(target_path.resolve())
 
         # 2. AI 분석을 위해 최신 센서/급수 데이터 가져오기
         latest_sensor = self.repository.get_latest_sensor_state(plant_id)
         latest_watering = self.repository.get_latest_watering_log(plant_id)
 
-        # 3. 외부 AI 호출 (OpenAI/Gemini 등)
+        # 3. 외부 AI 호출 (이미 ai_client는 disk path를 받아 temp resizing을 처리함)
         try:
+            # AI 호출 시에는 원본 파일 경로를 넘기고 내부에서 1536px로 리사이즈하여 전송
+            # ai_client.analyze_plant_photo가 이미 bytes와 path를 모두 지원하는지 확인해야 하지만
+            # 여기서는 path를 그대로 넘기기 위해 ai_client 코드를 점검해야 함.
+            # 하지만 이미 ask_question은 path를 받음. analyze_plant_photo도 수정 필요함.
             ai_payload = await self.ai_client.analyze_plant_photo(
                 plant=plant,
-                image_bytes=file_bytes,
+                image_path=final_image_path,  # bytes 대신 path 전달
                 mime_type=mime_type,
                 latest_sensor=latest_sensor,
                 latest_watering=latest_watering,
@@ -142,24 +156,22 @@ class MonitoringService:
                 metadata={"error": str(error)},
                 plant_id=plant_id,
             )
-            if image_path:
-                try:
-                    Path(image_path).unlink(missing_ok=True)
-                except Exception:
-                    pass
+            if save_image and final_image_path != image_path:
+                try: Path(final_image_path).unlink(missing_ok=True)
+                except Exception: pass
             raise
 
-        # 4. 분석 결과 및 사진 정보를 DB에 원자적으로(Transaction) 저장
+        # 4. 분석 결과 및 사진 정보를 DB에 저장
         with self.repository.database.transaction():
             image_id = None
             camera_capture_id = None
-            if save_image and image_path:
-                uploaded_image = self.repository.save_uploaded_image(plant_id, image_path, file_name, mime_type)
+            if save_image and final_image_path:
+                uploaded_image = self.repository.save_uploaded_image(plant_id, final_image_path, file_name, mime_type)
                 image_id = uploaded_image["id"]
                 camera_capture = self.repository.save_camera_capture(
                     plant_id=plant_id,
                     purpose="manual_upload",
-                    image_path=image_path,
+                    image_path=final_image_path,
                     image_id=image_id,
                     original_name=file_name,
                     mime_type=mime_type,
@@ -187,17 +199,14 @@ class MonitoringService:
     async def trigger_abnormal_analysis(self, plant_id: int, note: str) -> dict:
         """
         이상이 감지되었을 때 정밀 분석(Gemini)을 수행합니다.
-        (로컬 AI 루프 또는 시뮬레이션에서 호출)
         """
         plant = self.repository.get_plant(plant_id)
         if plant is None:
             raise LookupError("식물을 찾을 수 없습니다.")
 
-        # 1. 최신 저장된 사진이 있는지 확인
         latest_image = self.repository.get_latest_uploaded_image(plant_id)
         
         image_path = None
-        file_bytes = None
         file_name = "abnormal_trigger.jpg"
         mime_type = "image/jpeg"
 
@@ -205,53 +214,37 @@ class MonitoringService:
             image_path = latest_image["file_path"]
             file_name = latest_image["original_name"]
             mime_type = latest_image["mime_type"]
-            with open(image_path, "rb") as f:
-                file_bytes = f.read()
         else:
-            # 사진이 없으면 실시간 촬영 시도
             from app.services.camera import capture_photo_to_disk
             import datetime
+            import asyncio
             now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
             file_name = f"auto_capture_{now_str}.jpg"
             image_path = str(Path(self.settings.uploads_dir) / file_name)
             try:
-                capture_photo_to_disk(image_path)
-                with open(image_path, "rb") as f:
-                    file_bytes = f.read()
-                
-                # [수정] 새로 찍은 사진을 DB에 등록하여 3장 유지 규칙이 적용되게 함
+                await asyncio.to_thread(capture_photo_to_disk, image_path)
                 new_img_record = self.repository.save_uploaded_image(
                     plant_id=plant_id,
                     file_path=image_path,
                     original_name=file_name,
                     mime_type=mime_type
                 )
-                latest_image = new_img_record # 아래 로직에서 image_id 연결을 위해 업데이트
+                latest_image = new_img_record 
             except Exception as e:
-                # 카메라가 없거나 오류 시 에러 로그 기록
                 self.repository.add_error("camera", f"이상 감지 자동 촬영 실패: {e}", plant_id=plant_id)
                 raise
 
-        # 2. 분석 수행 (기존 로직 재활용)
-        # 이미 파일이 디스크에 있으므로 save_image=False로 호출 (중복 방지)
-        # 단, 새로 촬영한 경우 DB에 등록이 필요할 수 있으나 
-        # 여기서는 단순 분석 결과 추가에 집중
+        # RAM에 올리지 않고 바로 경로로 전달
         result = await self.analyze_uploaded_photo(
             plant_id=plant_id,
             file_name=file_name,
-            file_bytes=file_bytes,
+            image_path=image_path,
             content_type=mime_type,
             note=note,
             save_image=False 
         )
         
-        # 만약 새로 찍은 사진이었다면 DB에 수동으로 연결해줄 수도 있지만, 
-        # 분석 결과에 image_id가 들어가는 것이 중요함.
-        # analyze_uploaded_photo(save_image=False)는 image_id를 None으로 함.
-        # 그래서 정교하게 하려면 image_id를 찾아야 함.
-        
         if latest_image and not result["analysis"]["image_id"]:
-            # 기존 사진을 썼다면 image_id 업데이트
             self.repository.database.execute(
                 "UPDATE analysis_results SET image_id = ? WHERE id = ?",
                 (latest_image["id"], result["analysis"]["id"])
@@ -269,8 +262,8 @@ class MonitoringService:
 
     async def ask_question_with_camera(self, plant_id: int, question_text: str) -> dict:
         """
-        사용자의 질문을 받고 실시간으로 카메라로 사진을 촬영한 뒤 Gemini에게 전달하여 답변을 받아냅니다.
-        라즈베리파이의 메모리 부족을 막기 위해 사진은 디스크에 직접 저장되며, AI 전송 후 즉시 삭제됩니다.
+        사용자의 질문과 함께 실시간 사진을 찍어 Gemini에게 전달합니다.
+        메모리 절약을 위해 임시 파일로 디스크에 저장한 뒤 AI 모듈에 경로만 넘깁니다.
         """
         plant = self.repository.get_plant(plant_id)
         if plant is None:
@@ -279,13 +272,14 @@ class MonitoringService:
         from app.services.camera import capture_photo_to_disk
         import os
         import uuid
-        
-        # 안전한 임시 파일 경로 (uploads_dir 내)
+        import asyncio
+
+        # 임시 사진 파일 경로 (uploads_dir 내)
         temp_image_path = str(Path(self.settings.uploads_dir) / f"temp_qa_{uuid.uuid4().hex}.jpg")
 
         try:
-            # 1. RAM에 사진 바이트를 담지 않고 디스크로 바로 저장
-            capture_photo_to_disk(temp_image_path)
+            # 1. RAM에 사진 바이트를 담지 않고 디스크로 바로 저장 (이벤트 루프 차단 방지)
+            await asyncio.to_thread(capture_photo_to_disk, temp_image_path)
 
             # 2. AI 질문 호출 (디스크 경로를 전달하여 내부에서 lazy loading 수행)
             answer_text = await self.ai_client.ask_plant_question(plant, temp_image_path, question_text)

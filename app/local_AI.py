@@ -111,15 +111,23 @@ async def run_local_ai_loop():
             original_path = uploads_dir / file_name
             capture_photo_to_disk(str(original_path))
             
+            # [수정: 무조건 DB에 먼저 저장하여 3장 유지 규칙의 울타리 안에 넣음]
+            with repository.database.transaction():
+                new_image = repository.save_uploaded_image(plant_id, str(original_path.resolve()), file_name, "image/jpeg")
+            
             # 2. 현재 상태 분석 (640px 메모리 최적화)
             temp_path = uploads_dir / f"temp_640_{uuid.uuid4().hex}.jpg"
-            create_preprocessed_temp(str(original_path), str(temp_path), max_dim=640)
-            with open(temp_path, "rb") as f: curr_metrics = analyzer.get_plant_metrics(f.read())
-            if temp_path.exists(): os.remove(temp_path)
+            try:
+                create_preprocessed_temp(str(original_path), str(temp_path), max_dim=640)
+                with open(temp_path, "rb") as f: curr_metrics = analyzer.get_plant_metrics(f.read())
+            finally:
+                if temp_path.exists(): os.remove(temp_path)
+            
             if not curr_metrics: continue
 
             # 3. 비교 데이터 준비 (직전 사진, 아침 사진)
             state = repository.get_latest_state(plant_id)
+            # 방금 저장된 현재 사진 말고, 그 전의 사진을 비교용으로 써야 함
             prev_id = state["previous_image_id"] if state else None
             morning_id = state["morning_image_id"] if state else None
             
@@ -158,16 +166,16 @@ async def run_local_ai_loop():
                     note = "시듦 감지(누적)"
 
             # 5. DB 저장 및 이상 발생 시 Gemini 즉시 호출
-            with repository.database.transaction():
-                repository.save_uploaded_image(plant_id, str(original_path.resolve()), file_name, "image/jpeg")
-            
+            # (사진은 이미 위에서 저장됨)
             if note:
+                # trigger_abnormal_analysis 안에서 최신 사진(위에서 저장한 new_image)을 꺼내어 사용함
                 await runtime.monitoring_service.trigger_abnormal_analysis(plant_id, f"[로컬감지] {note}")
             
             print(f"[Local AI] {now.strftime('%H:%M:%S')} - 분석 완료 (이상: {note is not None})")
             
         except Exception as e:
-            print(f"[Error] Local AI Loop 실패: {e}")
+            import traceback
+            print(f"[Error] Local AI Loop 실패: {e}\n{traceback.format_exc()}")
             
         await asyncio.sleep(600) # 10분 주기
 

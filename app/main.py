@@ -68,10 +68,10 @@ def build_kiosk_payload(dashboard: dict[str, Any] | None, settings: Settings) ->
     health_score = latest_analysis.get("health_score")
     if health_score is None:
         health_score = latest_state.get("latest_health_score")
-    
-    confidence = latest_analysis.get("confidence")
-    if confidence is None:
-        confidence = latest_state.get("latest_confidence")
+        
+    # [수정] 분석 결과가 아예 없는 초기 상태(대기)라면 점수를 None으로 취급
+    if health_status is None:
+        health_score = None
 
     alert_level = health_status if health_status in {"warning", "critical"} else None
     can_confirm_action = bool(
@@ -192,45 +192,39 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         
         plant_dict = runtime.monitoring_service.create_plant(payload.name, payload.species, payload.location)
         plant_id = plant_dict["plant"]["id"]
+        file_path: str | None = None
         
         try:
             # 1. 초기 상태 설정을 위한 고해상도 카메라 촬영 및 원본 저장
             now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
             file_name = f"initial_capture_{now_str}.jpg"
             file_path = str(Path(runtime.settings.uploads_dir) / file_name)
-            capture_photo_to_disk(file_path)
+            await asyncio.to_thread(capture_photo_to_disk, file_path)
             
-            # 2. AI 분석 요청 (이 과정에서 사진이 저장되고 AI 평가 결과가 DB에 기록됨)
-            # 여기서는 파일 경로를 명시하고, 바이트는 넘기지 않음
-            with open(file_path, "rb") as f:
-                file_bytes = f.read()
-
+            # 2. AI 분석 요청 (RAM 적재 없이 파일 경로 전달, DB 저장까지 원자적으로 처리)
+            # save_image=True로 하여 analysis_results와 uploaded_images가 연결되도록 함 (3장 유지 규칙 정상 작동)
             await runtime.monitoring_service.analyze_uploaded_photo(
                 plant_id=plant_id,
                 file_name=file_name,
-                file_bytes=file_bytes, # API 하위 호환성을 위해 바이트를 넘김
+                image_path=file_path,
                 content_type="image/jpeg",
                 note="[초기 등록] 식물이 시스템에 새로 등록되어 자동 촬영되었습니다.",
-                save_image=False # 초기 캡처 파일은 별도로 저장 관리할 수 있으나, 이미 디스크에 있으므로 False, 또는 True로 하되 file_bytes를 씀.
+                save_image=True 
             )
             
-            # 초기 사진이므로 DB에 업로드된 사진으로 등록해줌
-            # analyze_uploaded_photo가 save_image=False이면 DB에 저장을 안함. 그래서 수동 저장.
-            new_image = runtime.repository.save_uploaded_image(
-                plant_id=plant_id,
-                file_path=file_path,
-                original_name=file_name,
-                mime_type="image/jpeg"
-            )
-            runtime.repository.update_latest_state(plant_id, latest_image_id=new_image["id"])
-            
-            # 분석이 완료된 후의 최신 대시보드 데이터로 갱신
             dashboard = runtime.repository.build_dashboard(plant_id)
         except Exception as e:
             import traceback
             import sys
-            print(f"\\n[Error] 식물 초기 등록 자동 촬영/분석 실패: {e}\\n{traceback.format_exc()}", file=sys.stderr)
+            print(f"\n[Error] 식물 초기 등록 자동 촬영/분석 실패: {e}\n{traceback.format_exc()}", file=sys.stderr)
             dashboard = runtime.repository.build_dashboard(plant_id)
+        finally:
+            # 초기 촬영 원본은 분석용으로만 사용하므로 항상 정리
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
             
         return {"dashboard": dashboard}
 
@@ -306,14 +300,6 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
             "dashboard": runtime.repository.build_dashboard(plant_id),
         }
 
-    @app.post("/api/plants/{plant_id}/demo-sensor")
-    async def create_demo_sensor(plant_id: int) -> dict:
-        """테스트용 데모 센서 데이터를 생성합니다."""
-        dashboard_payload = runtime.monitoring_service.generate_demo_sensor(plant_id)
-        if dashboard_payload is None:
-            raise HTTPException(status_code=404, detail="식물 정보를 찾을 수 없습니다.")
-        return {"dashboard": dashboard_payload}
-
     @app.post("/api/plants/{plant_id}/analyze-photo")
     async def analyze_photo(
         plant_id: int,
@@ -321,11 +307,20 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         note: str | None = Form(default=None),
     ) -> dict:
         """식물 사진을 업로드하여 외부 AI(GPT, Gemini 등)에게 분석을 요청합니다."""
+        import uuid
+        import shutil
+        import os
+        temp_path = str(Path(runtime.settings.uploads_dir) / f"temp_upload_{uuid.uuid4().hex}.jpg")
+        
         try:
+            # 스트림 방식으로 디스크에 바로 쓰기 (RAM 절약)
+            with open(temp_path, "wb") as buffer:
+                shutil.copyfileobj(image.file, buffer)
+                
             payload = await runtime.monitoring_service.analyze_uploaded_photo(
                 plant_id=plant_id,
                 file_name=image.filename or "plant-image.jpg",
-                file_bytes=await image.read(),
+                image_path=temp_path,
                 content_type=image.content_type,
                 note=note,
             )
@@ -335,6 +330,11 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(error)) from error
         except Exception as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
+        finally:
+            if os.path.exists(temp_path):
+                try: os.remove(temp_path)
+                except: pass
+                
         return payload
 
     @app.post("/api/analyses/{analysis_id}/confirm")

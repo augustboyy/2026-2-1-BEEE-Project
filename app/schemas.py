@@ -16,15 +16,14 @@ class PlantCreateRequest(BaseModel):
 
 
 class SensorLogRequest(BaseModel):
-    """센서 데이터 전송 요청을 위한 모델입니다."""
+    """센서 수신 API 요청을 위한 데이터 모델입니다."""
     model_config = ConfigDict(populate_by_name=True)
     plant_id: int | None = None  # 식물 ID (선택)
     moisture_value: float = Field(
         ...,
         ge=0,
         le=100,
-        validation_alias=AliasChoices("moisture_value", "humidity"),
-    )  # 토양 습도 (0~100%)
+    )  # 토양 수분 (0~100%)
     temperature: float | None = Field(default=None, ge=-20, le=60)  # 온도 (-20~60°C)
     source: str = Field(default="external-device", max_length=60)  # 데이터 출처
 

@@ -33,14 +33,17 @@ def _dispatch_payload(client: httpx.Client, payload: dict[str, Any]) -> None:
     else:
         raise ValueError("알 수 없는 JSON 형식입니다. signal 또는 moisture_value 필드가 필요합니다.")
 
-    response = client.post(endpoint, json=payload)
-    if response.is_error:
-        detail = response.text
-        try:
-            detail = response.json().get("detail", detail)
-        except Exception:
-            pass
-        raise RuntimeError(f"API 오류: {detail}")
+    try:
+        response = client.post(endpoint, json=payload)
+        if response.is_error:
+            detail = response.text
+            try:
+                detail = response.json().get("detail", detail)
+            except Exception:
+                pass
+            print(f"[Serial] API 오류: {detail}")
+    except httpx.RequestError as e:
+        print(f"[Serial] API 연결 실패 (서버가 응답하지 않음): {e}")
 
 
 def listen() -> None:
