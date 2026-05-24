@@ -223,7 +223,7 @@ class AIClient:
             # 2. 1536px로 리사이징
             await asyncio.to_thread(create_preprocessed_temp, original_path, temp_1536_path, 1536)
             
-            prompt = "이 식물이 무엇인지 가장 가능성 높은 식물 종(species) 학명이나 일반적인 이름 하나만 추정해주세요. 다른 설명 없이 딱 이름만 말해주세요."
+            prompt = "이 식물이 무엇인지 가장 가능성 높은 식물 종(species)의 일반적인 이름(한국어로 일상에서 흔히 부르는 이름) 하나만 추정해주세요. 다른 설명 없이 딱 이름만 말해주세요."
             
             def _call_gemini_id():
                 img = Image.open(temp_1536_path) 
