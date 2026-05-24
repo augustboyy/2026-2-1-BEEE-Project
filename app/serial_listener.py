@@ -28,7 +28,7 @@ def _build_client() -> httpx.Client:
 def _dispatch_payload(client: httpx.Client, payload: dict[str, Any]) -> None:
     if "signal" in payload:
         endpoint = "/api/external/watering-signal"
-    elif "moisture_value" in payload or "humidity" in payload:
+    elif "moisture_value" in payload or "temperature" in payload:
         endpoint = "/api/external/sensor-data"
     else:
         raise ValueError("알 수 없는 JSON 형식입니다. signal 또는 moisture_value 필드가 필요합니다.")

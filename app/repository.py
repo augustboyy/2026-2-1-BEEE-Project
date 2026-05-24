@@ -146,8 +146,6 @@ class PlantRepository:
         recommended_moisture_max: float | None = None,
         recommended_temperature_min: float | None = None,
         recommended_temperature_max: float | None = None,
-        recommended_humidity_min: float | None = None,
-        recommended_humidity_max: float | None = None,
         watering_interval_days: int | None = None,
         care_notes: dict[str, Any] | list[Any] | None = None,
     ) -> dict[str, Any]:
@@ -163,7 +161,6 @@ class PlantRepository:
                 species_name, common_name, description,
                 recommended_moisture_min, recommended_moisture_max,
                 recommended_temperature_min, recommended_temperature_max,
-                recommended_humidity_min, recommended_humidity_max,
                 watering_interval_days, care_notes_json, created_at, updated_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -173,9 +170,7 @@ class PlantRepository:
                 recommended_moisture_min = COALESCE(excluded.recommended_moisture_min, species_profiles.recommended_moisture_min),
                 recommended_moisture_max = COALESCE(excluded.recommended_moisture_max, species_profiles.recommended_moisture_max),
                 recommended_temperature_min = COALESCE(excluded.recommended_temperature_min, species_profiles.recommended_temperature_min),
-                recommended_temperature_max = COALESCE(excluded.recommended_temperature_max, species_profiles.recommended_temperature_max),
-                recommended_humidity_min = COALESCE(excluded.recommended_humidity_min, species_profiles.recommended_humidity_min),
-                recommended_humidity_max = COALESCE(excluded.recommended_humidity_max, species_profiles.recommended_humidity_max),
+                recommended_temperature_max = COALESCE(excluded.recommended_temperature_max, species_profiles.recommended_temperature_max), species_profiles.recommended_humidity_min), species_profiles.recommended_humidity_max),
                 watering_interval_days = COALESCE(excluded.watering_interval_days, species_profiles.watering_interval_days),
                 care_notes_json = CASE
                     WHEN excluded.care_notes_json = '{}' THEN species_profiles.care_notes_json
@@ -191,8 +186,6 @@ class PlantRepository:
                 recommended_moisture_max,
                 recommended_temperature_min,
                 recommended_temperature_max,
-                recommended_humidity_min,
-                recommended_humidity_max,
                 watering_interval_days,
                 _json_dumps(care_notes, {}),
                 now,
@@ -507,8 +500,8 @@ class PlantRepository:
         self.database.execute(
             """
             INSERT INTO latest_sensor_state
-            (plant_id, latest_sensor_log_id, moisture_value, temperature, light_level, source, received_at, updated_at)
-            VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
+            (plant_id, latest_sensor_log_id, moisture_value, temperature, source, received_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(plant_id) DO UPDATE SET
                 latest_sensor_log_id = excluded.latest_sensor_log_id,
                 moisture_value = excluded.moisture_value,

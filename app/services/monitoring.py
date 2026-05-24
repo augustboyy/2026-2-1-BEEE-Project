@@ -96,7 +96,7 @@ class MonitoringService:
             note=f"{source}:{clean_signal}",
         )
 
-        async def analyze_uploaded_photo(
+    async def analyze_uploaded_photo(
         self,
         plant_id: int,
         file_name: str,

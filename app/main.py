@@ -263,12 +263,15 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="plant_id is required.")
         try:
             log = runtime.monitoring_service.log_sensor(payload.plant_id, payload)
+            return {
+                "sensor_log": log,
+                "dashboard": runtime.repository.build_dashboard(payload.plant_id),
+            }
         except LookupError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        return {
-            "sensor_log": log,
-            "dashboard": runtime.repository.build_dashboard(payload.plant_id),
-        }
+        except Exception as error:
+            import traceback
+            raise HTTPException(status_code=500, detail=traceback.format_exc())
 
     @app.post("/api/external/watering-signal")
     async def receive_watering_signal(payload: WateringSignalRequest) -> dict:
