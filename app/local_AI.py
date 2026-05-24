@@ -28,6 +28,7 @@ THRESHOLDS = {
 class LocalAnalyzer:
     """YOLOv8 및 OpenCV를 이용한 로컬 영상 분석 클래스"""
     _model = None
+    _clahe = None
 
     @classmethod
     def get_model(cls):
@@ -38,6 +39,24 @@ class LocalAnalyzer:
                 model_path = Path("yolov8n.pt")
             cls._model = YOLO(str(model_path))
         return cls._model
+
+    @classmethod
+    def _get_clahe(cls):
+        if cls._clahe is None:
+            cls._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        return cls._clahe
+
+    @classmethod
+    def _preprocess_for_detection(cls, img: np.ndarray) -> np.ndarray:
+        """저조도 대비 향상을 위해 L 채널만 CLAHE 적용 (색 분석용 원본은 유지)."""
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        l_channel, a_channel, b_channel = cv2.split(lab)
+        l_channel = cls._get_clahe().apply(l_channel)
+        merged = cv2.merge((l_channel, a_channel, b_channel))
+        enhanced = cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
+        denoised = cv2.bilateralFilter(enhanced, d=5, sigmaColor=50, sigmaSpace=50)
+        blurred = cv2.GaussianBlur(denoised, (0, 0), sigmaX=1.0)
+        return cv2.addWeighted(denoised, 1.35, blurred, -0.35, 0)
 
     @classmethod
     def get_plant_metrics(cls, image_bytes: bytes):
@@ -54,7 +73,8 @@ class LocalAnalyzer:
             return None
         
         model = cls.get_model()
-        results = model.predict(img, conf=0.25, verbose=False)
+        detect_img = cls._preprocess_for_detection(img)
+        results = model.predict(detect_img, conf=0.25, verbose=False)
         
         leaf_count = 0
         max_height = 0
@@ -84,7 +104,7 @@ class LocalAnalyzer:
         total_yellow = cv2.countNonZero(yellow_mask)
         yellow_ratio = total_yellow / (total_green + total_yellow + 1e-6)
         
-        del img, results, green_mask, yellow_mask, leaf_mask
+        del img, detect_img, results, green_mask, yellow_mask, leaf_mask
         if has_torch and torch.cuda.is_available(): torch.cuda.empty_cache()
         gc.collect()
         

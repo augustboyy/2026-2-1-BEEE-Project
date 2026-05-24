@@ -170,7 +170,7 @@ class PlantRepository:
                 recommended_moisture_min = COALESCE(excluded.recommended_moisture_min, species_profiles.recommended_moisture_min),
                 recommended_moisture_max = COALESCE(excluded.recommended_moisture_max, species_profiles.recommended_moisture_max),
                 recommended_temperature_min = COALESCE(excluded.recommended_temperature_min, species_profiles.recommended_temperature_min),
-                recommended_temperature_max = COALESCE(excluded.recommended_temperature_max, species_profiles.recommended_temperature_max), species_profiles.recommended_humidity_min), species_profiles.recommended_humidity_max),
+                recommended_temperature_max = COALESCE(excluded.recommended_temperature_max, species_profiles.recommended_temperature_max),
                 watering_interval_days = COALESCE(excluded.watering_interval_days, species_profiles.watering_interval_days),
                 care_notes_json = CASE
                     WHEN excluded.care_notes_json = '{}' THEN species_profiles.care_notes_json

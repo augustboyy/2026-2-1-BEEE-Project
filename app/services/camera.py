@@ -4,12 +4,26 @@
 
 import cv2
 import os
+import tempfile
 import time
 from PIL import Image, ImageEnhance
 from pathlib import Path
 
 # 파일 기반 락 (Cross-process)
-LOCK_FILE_PATH = Path("camera.lock")
+LOCK_FILE_PATH = Path(tempfile.gettempdir()) / "plant_pulse_camera.lock"
+LOCK_STALE_SECONDS = 60
+
+
+def _is_process_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
 
 class FileLock:
     def __enter__(self):
@@ -17,19 +31,32 @@ class FileLock:
             try:
                 # stale lock 체크
                 if LOCK_FILE_PATH.exists():
+                    stale = False
                     try:
-                        with open(LOCK_FILE_PATH, 'r') as f:
-                            pid = int(f.read().strip())
-                        # 프로세스가 살아있는지 확인 (os.kill(pid, 0)은 프로세스가 존재하면 아무 일도 안 함)
-                        os.kill(pid, 0)
-                    except (ValueError, OSError, ProcessLookupError):
-                        # 프로세스가 죽었거나 파일 내용이 이상하면 강제 삭제
-                        try: os.remove(LOCK_FILE_PATH)
-                        except Exception: pass
+                        raw = LOCK_FILE_PATH.read_text().strip()
+                        pid_str, ts_str = raw.split(",", 1)
+                        pid = int(pid_str)
+                        lock_time = float(ts_str)
+                        if not _is_process_alive(pid):
+                            stale = True
+                        elif time.time() - lock_time > LOCK_STALE_SECONDS:
+                            stale = True
+                    except Exception:
+                        try:
+                            if time.time() - LOCK_FILE_PATH.stat().st_mtime > LOCK_STALE_SECONDS:
+                                stale = True
+                        except Exception:
+                            stale = False
+                    if stale:
+                        # 프로세스가 죽었거나 락이 오래된 경우 강제 삭제
+                        try:
+                            LOCK_FILE_PATH.unlink()
+                        except Exception:
+                            pass
                 
                 # 'x' 모드는 파일이 존재하면 FileExistsError 발생시킴 (Atomic)
                 with open(LOCK_FILE_PATH, 'x') as f:
-                    f.write(str(os.getpid()))
+                    f.write(f"{os.getpid()},{time.time()}")
                 return self
             except FileExistsError:
                 time.sleep(0.1)
