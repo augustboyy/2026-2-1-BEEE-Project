@@ -92,6 +92,12 @@ class LocalAnalyzer:
             for box in all_boxes:
                 bx1, by1, bx2, by2 = map(int, box)
                 cv2.rectangle(leaf_mask, (bx1, by1), (bx2, by2), 255, -1)
+        else:
+            del img, detect_img, results, leaf_mask
+            if has_torch and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+            return None
         
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         # 초록색/노란색 범위 필터링 (잎 영역 내부에서만)
