@@ -33,9 +33,14 @@ class LocalAnalyzer:
     @classmethod
     def get_model(cls):
         if cls._model is None:
-            model_path = PROJECT_ROOT / "weights" / "best.pt"
-            if not model_path.exists():
-                print(f"[Warning] YOLO model not found at {model_path}. Using base yolov8n.pt.")
+            onnx_path = PROJECT_ROOT / "weights" / "best.onnx"
+            pt_path = PROJECT_ROOT / "weights" / "best.pt"
+            if onnx_path.exists():
+                model_path = onnx_path
+            elif pt_path.exists():
+                model_path = pt_path
+            else:
+                print(f"[Warning] YOLO model not found at {onnx_path} or {pt_path}. Using base yolov8n.pt.")
                 model_path = Path("yolov8n.pt")
             cls._model = YOLO(str(model_path))
         return cls._model

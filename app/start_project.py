@@ -31,6 +31,10 @@ def main() -> None:
     python_executable = sys.executable
     # 현재 프로세스의 환경 변수를 복사합니다.
     env = os.environ.copy()
+    env.setdefault("SERIAL_PORT", "auto")
+    env.setdefault("SERIAL_BAUD", "115200")
+    env.setdefault("SERIAL_TIMEOUT", "1.0")
+    env.setdefault("SERIAL_RECONNECT_DELAY", "5.0")
 
     # 프로세스 그룹/세션 생성 옵션 (하위 프로세스 통째로 종료하기 위함)
     popen_kwargs = {}
@@ -83,20 +87,17 @@ def main() -> None:
     )
     
     # 4. 시리얼 리스너 실행 (SERIAL_PORT가 설정된 경우)
-    serial_process = None
-    if env.get("SERIAL_PORT"):
-        serial_process = subprocess.Popen(
-            [python_executable, serial_listener_script],
-            env=env,
-            **popen_kwargs
-        )
+    serial_process = subprocess.Popen(
+        [python_executable, serial_listener_script],
+        env=env,
+        **popen_kwargs
+    )
 
     # 실행 중인 서버들의 주소를 출력합니다.
     print(f"API: {settings.api_base_url}/api/health")
     print(f"Dashboard: http://{settings.dashboard_host}:{settings.dashboard_port}")
     print("Local AI: Background camera service started (10-min interval)")
-    if serial_process:
-        print("Serial Listener: Arduino JSON listener started")
+    print("Serial Listener: Arduino JSON listener started")
     print("중지하려면 Ctrl+C 를 누르세요.")
 
     try:
@@ -115,8 +116,7 @@ def main() -> None:
     finally:
         # OS별 하위 프로세스 트리 완벽 종료 로직 (윈도우 & 라즈베리파이/리눅스 호환)
         processes = [local_ai_process, dashboard_process, api_process]
-        if serial_process:
-            processes.insert(0, serial_process)
+        processes.insert(0, serial_process)
         for process in processes:
             if process.poll() is None:
                 try:

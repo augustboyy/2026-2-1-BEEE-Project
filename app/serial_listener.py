@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any, Tuple
 
 import httpx
@@ -28,6 +29,16 @@ MOISTURE_RAW_WET = 400.0
 def _build_client() -> httpx.Client:
     settings = load_settings()
     return httpx.Client(base_url=settings.api_base_url, timeout=10)
+
+
+def _detect_serial_port() -> str | None:
+    if SERIAL_PORT and SERIAL_PORT.lower() != "auto":
+        return SERIAL_PORT
+    dev_root = Path("/dev")
+    if not dev_root.exists():
+        return None
+    candidates = sorted(dev_root.glob("ttyUSB*")) + sorted(dev_root.glob("ttyACM*"))
+    return str(candidates[0]) if candidates else None
 
 
 def _dispatch_payload(client: httpx.Client, payload: dict[str, Any]) -> None:
@@ -94,18 +105,20 @@ def _write_nack(ser: serial.Serial, seq: int | None) -> None:
 
 
 def listen() -> None:
-    if not SERIAL_PORT:
-        raise RuntimeError("SERIAL_PORT 환경 변수를 설정해 주세요. 예: /dev/ttyACM0")
-
     last_seq_by_key: dict[Tuple[str, int, str], int] = {}
     while True:
+        serial_port = _detect_serial_port()
+        if not serial_port:
+            print("[Serial] SERIAL_PORT가 없습니다. /dev/ttyUSB0 또는 /dev/ttyACM0 연결을 확인하세요.")
+            time.sleep(RECONNECT_DELAY)
+            continue
         try:
             with serial.Serial(
-                SERIAL_PORT,
+                serial_port,
                 SERIAL_BAUD,
                 timeout=SERIAL_TIMEOUT,
             ) as ser, _build_client() as client:
-                print(f"[Serial] Connected: {SERIAL_PORT} @ {SERIAL_BAUD}bps")
+                print(f"[Serial] Connected: {serial_port} @ {SERIAL_BAUD}bps")
                 while True:
                     raw = ser.readline()
                     if not raw:
