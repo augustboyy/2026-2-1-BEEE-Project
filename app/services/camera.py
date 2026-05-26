@@ -12,6 +12,8 @@ from pathlib import Path
 # 파일 기반 락 (Cross-process)
 LOCK_FILE_PATH = Path(tempfile.gettempdir()) / "plant_pulse_camera.lock"
 LOCK_STALE_SECONDS = 60
+PICAM_STILL_RESOLUTION = (3280, 2464)
+PICAM_WARMUP_SECONDS = 2.0
 
 
 def _is_process_alive(pid: int) -> bool:
@@ -71,9 +73,12 @@ class FileLock:
 
 def capture_photo_to_disk(file_path: str) -> None:
     """
-    기본 카메라(0번)를 열어 사진을 한 장 촬영하고, 메모리를 최소화하며 디스크에 직접 저장합니다.
+    라즈베리파이 환경에서는 Picamera2로 8MP 정지화면을 캡처합니다.
+    그 외 환경에서는 기본 카메라(0번)를 열어 디스크에 직접 저장합니다.
     """
     with FileLock():
+        if _capture_with_picamera2(file_path):
+            return
         cap = None
         
         # 카메라가 OS 레벨에서 릴리즈되는 데 시간이 걸릴 수 있으므로 재시도
@@ -108,6 +113,32 @@ def capture_photo_to_disk(file_path: str) -> None:
         finally:
             if cap:
                 cap.release()
+
+
+def _capture_with_picamera2(file_path: str) -> bool:
+    try:
+        from picamera2 import Picamera2
+    except Exception:
+        return False
+
+    picam2 = Picamera2()
+    try:
+        config = picam2.create_still_configuration({"size": PICAM_STILL_RESOLUTION})
+        picam2.configure(config)
+        picam2.start()
+        time.sleep(PICAM_WARMUP_SECONDS)
+        frame_rgb = picam2.capture_array()
+    finally:
+        try:
+            picam2.stop()
+        except Exception:
+            pass
+
+    frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+    success = cv2.imwrite(file_path, frame_bgr)
+    if not success:
+        raise RuntimeError("사진을 디스크에 저장할 수 없습니다.")
+    return True
 
 def create_preprocessed_temp(original_path: str, temp_path: str, max_dim: int, apply_enhancement: bool = False) -> None:
     """
