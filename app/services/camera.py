@@ -123,20 +123,22 @@ def _capture_with_picamera2(file_path: str) -> bool:
 
     picam2 = Picamera2()
     try:
-        config = picam2.create_still_configuration({"size": PICAM_STILL_RESOLUTION})
+        config = picam2.create_still_configuration({"size": PICAM_STILL_RESOLUTION}, buffer_count=1)
         picam2.configure(config)
         picam2.start()
         time.sleep(PICAM_WARMUP_SECONDS)
-        frame_rgb = picam2.capture_array()
+        picam2.capture_file(file_path)
     finally:
         try:
             picam2.stop()
         except Exception:
             pass
+        try:
+            picam2.close()
+        except Exception:
+            pass
 
-    frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-    success = cv2.imwrite(file_path, frame_bgr)
-    if not success:
+    if not os.path.exists(file_path):
         raise RuntimeError("사진을 디스크에 저장할 수 없습니다.")
     return True
 
