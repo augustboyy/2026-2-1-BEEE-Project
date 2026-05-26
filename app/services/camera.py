@@ -12,7 +12,7 @@ from pathlib import Path
 # 파일 기반 락 (Cross-process)
 LOCK_FILE_PATH = Path(tempfile.gettempdir()) / "plant_pulse_camera.lock"
 LOCK_STALE_SECONDS = 60
-PICAM_STILL_RESOLUTION = (3280, 2464)
+PICAM_STILL_RESOLUTION = (1920, 1080)
 PICAM_WARMUP_SECONDS = 2.0
 
 
@@ -123,7 +123,10 @@ def _capture_with_picamera2(file_path: str) -> bool:
 
     picam2 = Picamera2()
     try:
-        config = picam2.create_still_configuration({"size": PICAM_STILL_RESOLUTION}, buffer_count=1)
+        config = picam2.create_still_configuration(
+            main={"size": PICAM_STILL_RESOLUTION},
+            buffer_count=1,
+        )
         picam2.configure(config)
         picam2.start()
         time.sleep(PICAM_WARMUP_SECONDS)
