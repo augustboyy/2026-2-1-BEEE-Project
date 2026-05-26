@@ -10,7 +10,7 @@
 DHT dht(DHTPIN, DHTTYPE);
 
 // 설정값
-const int MOISTURE_THRESHOLD = 500; // 급수 시작 기준값 (실험 후 조정 필요)
+const int MOISTURE_THRESHOLD = 800; // 급수 시작 기준값 (실험 후 조정 필요)
 const unsigned long SEND_INTERVAL = 60000; // 1분 (ms 단위)
 const int PLANT_ID = 1; // FastAPI에 등록된 식물 ID로 맞춰주세요.
 const char* SENSOR_SOURCE = "arduino-serial";
@@ -37,9 +37,6 @@ void loop() {
   // 1. 센서 데이터 읽기
   float temperature = dht.readTemperature(); // DHT11은 온도만 사용
   int soilMoistureRaw = analogRead(SOIL_MOISTURE_PIN);
-  // 토양 습도를 0~100%로 변환 (역전위 주의: 건조할수록 값이 큼)
-  int soilMoisturePercent = map(soilMoistureRaw, 1023, 0, 0, 100);
-  soilMoisturePercent = constrain(soilMoisturePercent, 0, 100);
 
   // 2. 자동 급수 로직 (토양 습도가 기준치 이하일 때)
   // % 기준일 경우 예: soilMoisturePercent < 30
@@ -48,7 +45,7 @@ void loop() {
     
     // 즉시 보고 (JSON 프로토콜, 급수 신호 전송)
     sendWateringSignal();
-    sendSensorPacket(temperature, soilMoisturePercent);
+    sendSensorPacket(temperature, soilMoistureRaw);
     
     delay(2000); // 2초간 급수 (시스템 규모에 맞게 조절)
     digitalWrite(RELAY_PIN, LOW);  // 펌프 중지
@@ -57,7 +54,7 @@ void loop() {
   // 3. 1분 주기 정기 보고
   if (currentTime - lastSendTime >= SEND_INTERVAL) {
     lastSendTime = currentTime;
-    sendSensorPacket(temperature, soilMoisturePercent);
+    sendSensorPacket(temperature, soilMoistureRaw);
   }
 }
 

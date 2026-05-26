@@ -21,6 +21,8 @@ RECONNECT_DELAY = float(os.getenv("SERIAL_RECONNECT_DELAY", "5.0"))
 ACK_PREFIX = "ACK:"
 NACK_PREFIX = "NACK:"
 SEQ_TRACK_LIMIT = 2000
+MOISTURE_RAW_DRY = 1023.0
+MOISTURE_RAW_WET = 400.0
 
 
 def _build_client() -> httpx.Client:
@@ -64,6 +66,20 @@ def _calc_checksum(payload: dict[str, Any]) -> int:
     except (TypeError, ValueError):
         temp_x10 = 0
     return (plant_id + moisture + temp_x10 + seq + type_code) & 0xFF
+
+
+def _normalize_moisture_value(value: Any) -> float:
+    try:
+        raw = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if 0.0 <= raw <= 100.0:
+        return raw
+    if MOISTURE_RAW_DRY <= MOISTURE_RAW_WET:
+        return 0.0
+    clamped = max(min(raw, MOISTURE_RAW_DRY), MOISTURE_RAW_WET)
+    percent = (MOISTURE_RAW_DRY - clamped) / (MOISTURE_RAW_DRY - MOISTURE_RAW_WET) * 100.0
+    return max(0.0, min(100.0, round(percent, 1)))
 
 
 def _write_ack(ser: serial.Serial, seq: int) -> None:
@@ -140,6 +156,8 @@ def listen() -> None:
                     if last_seq is not None and seq <= last_seq:
                         _write_ack(ser, seq)
                         continue
+                    if "moisture_value" in payload:
+                        payload["moisture_value"] = _normalize_moisture_value(payload.get("moisture_value"))
                     try:
                         _dispatch_payload(client, payload)
                         last_seq_by_key[key] = seq
