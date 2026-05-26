@@ -6,12 +6,18 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any, Tuple
 
 import httpx
 import serial
+
+# 패키지 실행/스크립트 실행 모두에서 app 모듈을 찾도록 프로젝트 루트를 보장합니다.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.config import load_settings
 

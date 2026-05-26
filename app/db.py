@@ -374,22 +374,39 @@ class Database:
             migrations = (
                 (1, BASE_SCHEMA_SQL),
                 (2, EXTENDED_SCHEMA_SQL + INDEX_SQL),
-                (3, "ALTER TABLE analysis_results ADD COLUMN health_score INTEGER NOT NULL DEFAULT 0; ALTER TABLE latest_state ADD COLUMN latest_health_score INTEGER DEFAULT 0;"),
-                (4, "ALTER TABLE latest_state ADD COLUMN morning_image_id INTEGER; ALTER TABLE latest_state ADD COLUMN previous_image_id INTEGER;"),
+                (3, None),
+                (4, None),
             )
             for target_version, migration_sql in migrations:
                 if version < target_version:
                     # 지정된 버전까지 순차적으로 마이그레이션 실행
-                    if target_version in [3, 4]:
-                        # ALTER TABLE은 여러 명령어를 한 번에 실행하기 어려울 수 있으므로 나눠서 실행
-                        for cmd in migration_sql.split(';'):
-                            if cmd.strip():
-                                self._connection.execute(cmd.strip())
+                    if target_version == 3:
+                        if not self._column_exists("analysis_results", "health_score"):
+                            self._connection.execute(
+                                "ALTER TABLE analysis_results ADD COLUMN health_score INTEGER NOT NULL DEFAULT 0;"
+                            )
+                        if not self._column_exists("latest_state", "latest_health_score"):
+                            self._connection.execute(
+                                "ALTER TABLE latest_state ADD COLUMN latest_health_score INTEGER DEFAULT 0;"
+                            )
+                    elif target_version == 4:
+                        if not self._column_exists("latest_state", "morning_image_id"):
+                            self._connection.execute(
+                                "ALTER TABLE latest_state ADD COLUMN morning_image_id INTEGER;"
+                            )
+                        if not self._column_exists("latest_state", "previous_image_id"):
+                            self._connection.execute(
+                                "ALTER TABLE latest_state ADD COLUMN previous_image_id INTEGER;"
+                            )
                     else:
                         self._connection.executescript(migration_sql)
                     self._connection.execute(f"PRAGMA user_version = {target_version};")
                     version = target_version
             self._connection.commit()
+
+    def _column_exists(self, table: str, column: str) -> bool:
+        rows = self._connection.execute(f"PRAGMA table_info({table});").fetchall()
+        return any(row["name"] == column for row in rows)
 
     def _get_user_version(self) -> int:
         """현재 DB의 스키마 버전을 가져옵니다."""
