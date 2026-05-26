@@ -81,5 +81,5 @@ def load_settings() -> Settings:
         ai_timeout_seconds=float(os.getenv("AI_TIMEOUT_SECONDS", "30")),
         max_upload_mb=int(os.getenv("MAX_UPLOAD_MB", "10")),
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview"),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"),
     )
