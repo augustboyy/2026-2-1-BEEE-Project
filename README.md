@@ -47,8 +47,8 @@ python -m app.start_project
 - 분석 주기: 10분 (`app/local_AI.py`의 `sleep(600)`에서 조정)
 - 이상징후 판단: 황화 비율/잎 감소/시듦 높이 변화
 - 이상 발생 시 Gemini에 **이상 내용 포함**하여 정밀 진단 요청
-- 'yolov8n 모델 전이학습
-- ![학습 결과](results.png)
+- 'yolov8n' 모델 전이학습
+![학습 결과](results.png)
 
 ## 주요 데이터 흐름
 1. Arduino → 시리얼 JSON → `app/serial_listener.py` → `POST /api/external/sensor-data`
