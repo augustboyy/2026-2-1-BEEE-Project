@@ -7,8 +7,6 @@
 4. FastAPI가 센서/사진/분석 결과를 SQLite에 저장합니다.
 5. Streamlit 대시보드가 최신 상태와 진단 결과를 시각화합니다.
 
-![학습 결과](results.png)
-
 이 프로젝트는 **Raspberry Pi(Linux) 배포**를 목표로 하는 식물 모니터링 시스템입니다. 개발은 Windows에서 진행하되, 모든 실행 환경은 Linux 호환을 기준으로 설계했습니다.
 
 ## 프로젝트 소개
@@ -32,7 +30,7 @@ python -m app.start_project
 ```
 
 실행 후 주소:
-- API: http://127.0.0.1:8000/api/health
+- Kioks: http://127.0.0.1:8000/kiosk
 - Dashboard: http://127.0.0.1:8501
 
 ## 환경 변수
@@ -49,6 +47,8 @@ python -m app.start_project
 - 분석 주기: 10분 (`app/local_AI.py`의 `sleep(600)`에서 조정)
 - 이상징후 판단: 황화 비율/잎 감소/시듦 높이 변화
 - 이상 발생 시 Gemini에 **이상 내용 포함**하여 정밀 진단 요청
+- 'yolov8n 모델 전이학습
+- ![학습 결과](results.png)
 
 ## 주요 데이터 흐름
 1. Arduino → 시리얼 JSON → `app/serial_listener.py` → `POST /api/external/sensor-data`
